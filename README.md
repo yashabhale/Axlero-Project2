@@ -29,3 +29,15 @@ mvn compile exec:java "-Dexec.mainClass=com.logstream.ingestion.IngestionTestRun
 ```
 
 The runner starts an ephemeral-port gRPC server, streams logs concurrently from separate mock services, exercises batch ingestion, and verifies all accepted counts. The included in-memory sink is a replaceable boundary for durable storage.
+
+## Run the frontend dashboard
+
+The React/Vite dashboard runs independently of the Java backend. From the repository root:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173) to view the dashboard. The log explorer uses mock data and supports local filtering such as `level:ERROR AND service:billing-api`; it does not yet connect to the ingestion service.

@@ -1,6 +1,9 @@
 ### IntelliJ IDEA ###
 out/
 target/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
 !**/src/main/**/out/
 !**/src/test/**/out/
 .kotlin
