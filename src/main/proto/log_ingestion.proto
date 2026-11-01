@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package logstream.ingestion.v1;
+
+option java_multiple_files = true;
+option java_package = "com.logstream.ingestion.v1";
+option java_outer_classname = "LogIngestionProto";
+
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  INFO = 1;
+  WARN = 2;
+  ERROR = 3;
+  DEBUG = 4;
+}
+
+message LogMessage {
+  int64 timestamp = 1;
+  LogLevel level = 2;
+  string service = 3;
+  string message = 4;
+  int32 response_time = 5;
+  map<string, string> tags = 6;
+}
+
+message IngestBatchRequest {
+  repeated LogMessage logs = 1;
+}
+
+message IngestResponse {
+  int64 accepted_count = 1;
+}
+
+service LogIngestionService {
+  rpc IngestLog(stream LogMessage) returns (IngestResponse);
+  rpc IngestBatchLogs(IngestBatchRequest) returns (IngestResponse);
+}
