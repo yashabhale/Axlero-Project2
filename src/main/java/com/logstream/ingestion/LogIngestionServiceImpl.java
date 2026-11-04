@@ -10,10 +10,13 @@ import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class LogIngestionServiceImpl extends LogIngestionServiceGrpc.LogIngestionServiceImplBase {
     private static final Logger logger = LoggerFactory.getLogger(LogIngestionServiceImpl.class);
+    private static final int STREAM_BATCH_SIZE = 256;
     private final LogSink logSink;
 
     public LogIngestionServiceImpl(LogSink logSink) {
@@ -26,6 +29,7 @@ public final class LogIngestionServiceImpl extends LogIngestionServiceGrpc.LogIn
 
         return new StreamObserver<>() {
             private boolean terminated;
+            private final List<LogMessage> pendingLogs = new ArrayList<>(STREAM_BATCH_SIZE);
 
             @Override
             public void onNext(LogMessage logMessage) {
@@ -34,15 +38,28 @@ public final class LogIngestionServiceImpl extends LogIngestionServiceGrpc.LogIn
                 }
                 try {
                     validate(logMessage);
-                    logSink.accept(logMessage);
-                    acceptedCount.incrementAndGet();
+                    pendingLogs.add(logMessage);
+                    if (pendingLogs.size() == STREAM_BATCH_SIZE) {
+                        flushPendingLogs();
+                    }
                 } catch (IllegalArgumentException exception) {
                     terminated = true;
+                    try {
+                        flushPendingLogs();
+                    } catch (RuntimeException storageException) {
+                        pendingLogs.clear();
+                        logger.error("Failed to persist logs before rejecting streamed log", storageException);
+                        responseObserver.onError(Status.INTERNAL
+                                .withDescription("Log ingestion failed")
+                                .asRuntimeException());
+                        return;
+                    }
                     responseObserver.onError(Status.INVALID_ARGUMENT
                             .withDescription(exception.getMessage())
                             .asRuntimeException());
                 } catch (RuntimeException exception) {
                     terminated = true;
+                    pendingLogs.clear();
                     logger.error("Failed to ingest streamed log", exception);
                     responseObserver.onError(Status.INTERNAL
                             .withDescription("Log ingestion failed")
@@ -53,6 +70,11 @@ public final class LogIngestionServiceImpl extends LogIngestionServiceGrpc.LogIn
             @Override
             public void onError(Throwable throwable) {
                 terminated = true;
+                try {
+                    flushPendingLogs();
+                } catch (RuntimeException exception) {
+                    logger.error("Failed to persist logs from interrupted stream", exception);
+                }
                 logger.warn("Log ingestion stream cancelled or failed: {}", throwable.getMessage());
             }
 
@@ -61,10 +83,28 @@ public final class LogIngestionServiceImpl extends LogIngestionServiceGrpc.LogIn
                 if (terminated) {
                     return;
                 }
-                long count = acceptedCount.get();
-                logger.info("Accepted {} logs from streaming ingestion", count);
-                responseObserver.onNext(IngestResponse.newBuilder().setAcceptedCount(count).build());
-                responseObserver.onCompleted();
+                try {
+                    flushPendingLogs();
+                    long count = acceptedCount.get();
+                    logger.info("Accepted {} logs from streaming ingestion", count);
+                    responseObserver.onNext(IngestResponse.newBuilder().setAcceptedCount(count).build());
+                    responseObserver.onCompleted();
+                } catch (RuntimeException exception) {
+                    terminated = true;
+                    logger.error("Failed to persist streamed logs", exception);
+                    responseObserver.onError(Status.INTERNAL
+                            .withDescription("Log ingestion failed")
+                            .asRuntimeException());
+                }
+            }
+
+            private void flushPendingLogs() {
+                if (pendingLogs.isEmpty()) {
+                    return;
+                }
+                logSink.acceptAll(pendingLogs);
+                acceptedCount.addAndGet(pendingLogs.size());
+                pendingLogs.clear();
             }
         };
     }
@@ -76,9 +116,7 @@ public final class LogIngestionServiceImpl extends LogIngestionServiceGrpc.LogIn
                 validate(logMessage);
             }
 
-            for (LogMessage logMessage : request.getLogsList()) {
-                logSink.accept(logMessage);
-            }
+            logSink.acceptAll(request.getLogsList());
 
             int count = request.getLogsCount();
             logger.info("Accepted batch of {} logs", count);

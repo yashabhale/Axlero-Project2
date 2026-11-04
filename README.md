@@ -28,7 +28,20 @@ Override service and log counts with application arguments:
 mvn compile exec:java "-Dexec.mainClass=com.logstream.ingestion.IngestionTestRunner" "-Dexec.args=8 25000"
 ```
 
-The runner starts an ephemeral-port gRPC server, streams logs concurrently from separate mock services, exercises batch ingestion, and verifies all accepted counts. The included in-memory sink is a replaceable boundary for durable storage.
+The runner starts an ephemeral-port gRPC server, streams logs concurrently from separate mock services, exercises batch ingestion, and verifies all accepted counts.
+
+## Database
+
+The gRPC server stores accepted logs in a local SQLite database at `data/logstream.db` by default. The schema stores log events and their tags in related tables, with indexes for timestamp, level, service, and tag searches. SQLite creates the database and schema automatically on startup; WAL mode is enabled for reliable concurrent reads and writes.
+
+Set `LOGSTREAM_DB_PATH` to use a different database file. For example, in PowerShell:
+
+```powershell
+$env:LOGSTREAM_DB_PATH = "C:\logstream\logs.db"
+mvn compile exec:java "-Dexec.mainClass=com.logstream.ingestion.LogIngestionServer"
+```
+
+The dashboard still uses mock data and is not connected to the gRPC service or database.
 
 ## Run the frontend dashboard
 
