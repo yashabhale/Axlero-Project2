@@ -80,10 +80,10 @@ export default function Sidebar() {
           <span>Help &amp; support</span>
         </button>
         <button className="profile-button" type="button">
-          <span className="profile-avatar">JD</span>
+          <span className="profile-avatar">YA</span>
           <span className="profile-copy">
-            <span className="profile-name">Jordan Davis</span>
-            <span className="profile-email">jordan@acme.io</span>
+            <span className="profile-name">Yash Abhale</span>
+            <span className="profile-email">yashabhale01@gmail.com</span>
           </span>
           <Settings2 aria-hidden="true" size={16} />
         </button>
