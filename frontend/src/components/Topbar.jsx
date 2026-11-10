@@ -29,7 +29,7 @@ export default function Topbar({ onMenuClick }) {
           <Plus size={15} />
           <span>Invite team</span>
         </button>
-        <button className="header-avatar" type="button" aria-label="Account menu">JD<ChevronDown size={12} /></button>
+        <button className="header-avatar" type="button" aria-label="Account menu">YA<ChevronDown size={12} /></button>
       </div>
     </header>
   )
