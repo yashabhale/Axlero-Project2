@@ -103,7 +103,7 @@ The dashboard supports local filtering examples such as `level:ERROR AND service
 └── out/                 # Additional generated or runtime output
 ```
 
-## Notes
+## Notes..
 
 - The backend is built for streaming and batch ingestion use cases.
 - The frontend currently does not yet connect to the gRPC ingestion service or persisted database.
