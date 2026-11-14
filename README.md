@@ -11,6 +11,7 @@ The Java sources are generated from `src/main/proto/log_ingestion.proto` during 
 - Streaming log ingestion over gRPC
 - Batch ingestion support for large log sets
 - SQLite persistence with indexed lookup support
+- Minute-level log-count aggregation over a requested time range
 - Local verification runner for mock service load testing
 - Frontend dashboard for exploring log data in a browser
 
@@ -63,6 +64,8 @@ The default configuration uses four mock services and 10,000 logs per service.
 ## Database
 
 The gRPC server stores accepted logs in a local SQLite database at `data/logstream.db` by default. The schema stores log events and related tags in separate tables, with indexes for timestamp, level, service, and tag-based events. SQLite creates the database automatically on startup and enables WAL mode for reliable concurrent reads and writes.
+
+The gRPC `GetLogCountsByMinute` endpoint returns minute-start timestamps and log counts for a half-open millisecond range (`start_timestamp_ms <= timestamp < end_timestamp_ms`). Empty minute buckets are included with a zero count, and ranges are limited to 31 days. The SQLite implementation groups records by minute in the database, using the timestamp index before returning chart-ready buckets.
 
 To use a different database file, set `LOGSTREAM_DB_PATH` before starting the server:
 

@@ -1,17 +1,23 @@
 package com.logstream.ingestion;
 
+import com.logstream.ingestion.v1.LogCountRequest;
+import com.logstream.ingestion.v1.LogCountResponse;
 import com.logstream.ingestion.v1.LogLevel;
 import com.logstream.ingestion.v1.LogMessage;
+import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -76,9 +82,67 @@ class SqliteLogSinkTest {
         }
     }
 
+    @Test
+    void aggregatesLogCountsIntoMinuteBucketsWithinRequestedRange() throws Exception {
+        Path databasePath = tempDirectory.resolve("logs.db");
+        long start = 1_730_000_000_000L;
+        try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {
+            sink.accept(logAt("api", "first", start + 1_000));
+            sink.accept(logAt("worker", "second", start + 20_000));
+            sink.accept(logAt("api", "next minute", start + 61_000));
+
+            List<TimeSeriesBucket> buckets = sink.countLogsByMinute(start, start + 60_000);
+
+            assertEquals(1, buckets.size());
+            assertEquals(start / 60_000 * 60_000, buckets.get(0).minuteStartMs());
+            assertEquals(2, buckets.get(0).count());
+        }
+    }
+
+    @Test
+    void grpcAggregationReturnsZeroCountBucketsForEmptyMinutes() throws Exception {
+        long start = 1_730_000_000_000L / 60_000 * 60_000;
+        try (SqliteLogSink sink = new SqliteLogSink(tempDirectory.resolve("logs.db"))) {
+            sink.accept(logAt("api", "first", start + 1_000));
+            List<LogCountResponse> responses = new ArrayList<>();
+            AtomicReference<Throwable> error = new AtomicReference<>();
+            StreamObserver<LogCountResponse> observer = new StreamObserver<>() {
+                @Override
+                public void onNext(LogCountResponse response) {
+                    responses.add(response);
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+                    error.set(throwable);
+                }
+
+                @Override
+                public void onCompleted() {
+                }
+            };
+
+            new LogIngestionServiceImpl(sink).getLogCountsByMinute(
+                    LogCountRequest.newBuilder()
+                            .setStartTimestampMs(start)
+                            .setEndTimestampMs(start + 120_000)
+                            .build(),
+                    observer);
+
+            assertNull(error.get());
+            assertEquals(2, responses.get(0).getBucketsCount());
+            assertEquals(1, responses.get(0).getBuckets(0).getCount());
+            assertEquals(0, responses.get(0).getBuckets(1).getCount());
+        }
+    }
+
     private static LogMessage log(String service, String message) {
+        return logAt(service, message, 1_730_000_000_000L);
+    }
+
+    private static LogMessage logAt(String service, String message, long timestamp) {
         return LogMessage.newBuilder()
-                .setTimestamp(1_730_000_000_000L)
+                .setTimestamp(timestamp)
                 .setLevel(LogLevel.INFO)
                 .setService(service)
                 .setMessage(message)

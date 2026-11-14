@@ -31,7 +31,22 @@ message IngestResponse {
   int64 accepted_count = 1;
 }
 
+message LogCountRequest {
+  int64 start_timestamp_ms = 1;
+  int64 end_timestamp_ms = 2;
+}
+
+message LogCountBucket {
+  int64 minute_start_ms = 1;
+  int64 count = 2;
+}
+
+message LogCountResponse {
+  repeated LogCountBucket buckets = 1;
+}
+
 service LogIngestionService {
   rpc IngestLog(stream LogMessage) returns (IngestResponse);
   rpc IngestBatchLogs(IngestBatchRequest) returns (IngestResponse);
+  rpc GetLogCountsByMinute(LogCountRequest) returns (LogCountResponse);
 }

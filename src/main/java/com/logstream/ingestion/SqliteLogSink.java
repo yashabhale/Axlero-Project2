@@ -13,6 +13,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -94,6 +95,28 @@ public final class SqliteLogSink implements LogSink {
                 exception.addSuppressed(rollbackException);
             }
             throw new IllegalStateException("Failed to persist log batch", exception);
+        }
+    }
+
+    @Override
+    public synchronized List<TimeSeriesBucket> countLogsByMinute(long startTimestampMs, long endTimestampMs) {
+        String sql = "SELECT (timestamp_ms / 60000) * 60000 AS minute_start_ms, COUNT(*) AS log_count "
+                + "FROM log_events WHERE timestamp_ms >= ? AND timestamp_ms < ? "
+                + "GROUP BY minute_start_ms ORDER BY minute_start_ms";
+        try (PreparedStatement query = connection.prepareStatement(sql)) {
+            query.setLong(1, startTimestampMs);
+            query.setLong(2, endTimestampMs);
+            try (ResultSet results = query.executeQuery()) {
+                List<TimeSeriesBucket> buckets = new ArrayList<>();
+                while (results.next()) {
+                    buckets.add(new TimeSeriesBucket(
+                            results.getLong("minute_start_ms"),
+                            results.getLong("log_count")));
+                }
+                return buckets;
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to aggregate log counts by minute", exception);
         }
     }
 

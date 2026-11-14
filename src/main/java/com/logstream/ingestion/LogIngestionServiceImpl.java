@@ -2,6 +2,8 @@ package com.logstream.ingestion;
 
 import com.logstream.ingestion.v1.IngestBatchRequest;
 import com.logstream.ingestion.v1.IngestResponse;
+import com.logstream.ingestion.v1.LogCountRequest;
+import com.logstream.ingestion.v1.LogCountResponse;
 import com.logstream.ingestion.v1.LogIngestionServiceGrpc;
 import com.logstream.ingestion.v1.LogLevel;
 import com.logstream.ingestion.v1.LogMessage;
@@ -12,11 +14,15 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class LogIngestionServiceImpl extends LogIngestionServiceGrpc.LogIngestionServiceImplBase {
     private static final Logger logger = LoggerFactory.getLogger(LogIngestionServiceImpl.class);
     private static final int STREAM_BATCH_SIZE = 256;
+    private static final long MILLIS_PER_MINUTE = 60_000L;
+    private static final long MAX_AGGREGATION_RANGE_MS = 31L * 24 * 60 * MILLIS_PER_MINUTE;
     private final LogSink logSink;
 
     public LogIngestionServiceImpl(LogSink logSink) {
@@ -130,6 +136,45 @@ public final class LogIngestionServiceImpl extends LogIngestionServiceGrpc.LogIn
             logger.error("Failed to ingest log batch", exception);
             responseObserver.onError(Status.INTERNAL
                     .withDescription("Log ingestion failed")
+                    .asRuntimeException());
+        }
+    }
+
+    @Override
+    public void getLogCountsByMinute(LogCountRequest request, StreamObserver<LogCountResponse> responseObserver) {
+        long startTimestampMs = request.getStartTimestampMs();
+        long endTimestampMs = request.getEndTimestampMs();
+        if (startTimestampMs < 0 || endTimestampMs <= startTimestampMs
+                || endTimestampMs - startTimestampMs > MAX_AGGREGATION_RANGE_MS) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("Aggregation range must be positive and no longer than 31 days")
+                    .asRuntimeException());
+            return;
+        }
+
+        try {
+            Map<Long, Long> countsByMinute = new TreeMap<>();
+            for (TimeSeriesBucket bucket : logSink.countLogsByMinute(startTimestampMs, endTimestampMs)) {
+                countsByMinute.put(bucket.minuteStartMs(), bucket.count());
+            }
+
+            long firstMinute = startTimestampMs / MILLIS_PER_MINUTE * MILLIS_PER_MINUTE;
+            long lastMinute = (endTimestampMs - 1) / MILLIS_PER_MINUTE * MILLIS_PER_MINUTE;
+            LogCountResponse.Builder response = LogCountResponse.newBuilder();
+            for (long minuteStart = firstMinute; ; minuteStart += MILLIS_PER_MINUTE) {
+                response.addBuckets(com.logstream.ingestion.v1.LogCountBucket.newBuilder()
+                        .setMinuteStartMs(minuteStart)
+                        .setCount(countsByMinute.getOrDefault(minuteStart, 0L)));
+                if (minuteStart == lastMinute) {
+                    break;
+                }
+            }
+            responseObserver.onNext(response.build());
+            responseObserver.onCompleted();
+        } catch (RuntimeException exception) {
+            logger.error("Failed to aggregate log counts by minute", exception);
+            responseObserver.onError(Status.INTERNAL
+                    .withDescription("Log aggregation failed")
                     .asRuntimeException());
         }
     }
