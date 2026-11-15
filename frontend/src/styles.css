@@ -207,6 +207,16 @@ a { color: inherit; text-decoration: none; }
 .table-tool-button:hover { background: #1d232d; }
 .export-button { color: #d5d9e2; }
 .table-container { overflow-x: auto; border-top: 1px solid #222831; }
+.log-volume-card { margin-bottom: 14px; padding: 14px 16px 4px; border: 1px solid #252b35; border-radius: 7px; background: #11161e; }
+.log-volume-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.log-volume-heading h2 { margin: 0 0 5px; color: #dce1ea; font-size: 12px; font-weight: 600; }
+.log-volume-heading > div:first-child > span { color: #788291; font: 9px var(--mono); }
+.log-volume-ranges { display: flex; gap: 3px; padding: 3px; border: 1px solid #272e39; border-radius: 5px; background: #0e1218; }
+.log-volume-range { padding: 4px 8px; border: 0; border-radius: 3px; color: #7d8795; background: transparent; font: 9px var(--mono); cursor: pointer; }
+.log-volume-range:hover { color: #c9c0ff; }
+.log-volume-range.active { color: #c7b9ff; background: #29243b; }
+.log-volume-range:focus-visible { outline: 1px solid #a58af8; outline-offset: 1px; }
+.log-volume-chart-loading { height: 190px; }
 .logs-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .logs-table thead { height: 33px; background: #12161d; }
 .logs-table th { padding: 0 10px; color: #626c79; font: 9px var(--mono); letter-spacing: .6px; text-align: left; white-space: nowrap; }

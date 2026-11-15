@@ -1,5 +1,7 @@
 import { ChevronDown, ChevronRight, Copy, Download, Ellipsis, ExternalLink, ListFilter } from 'lucide-react'
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
+
+const ReactECharts = lazy(() => import('./EChartsView.jsx'))
 
 function formatTimestamp(timestamp) {
   const date = new Date(timestamp)
@@ -83,6 +85,100 @@ function LogRow({ log, expanded, onToggle }) {
   )
 }
 
+function LogVolumeChart({ logs }) {
+  const [rangeMinutes, setRangeMinutes] = useState(60)
+  const now = Date.now()
+  const bucketMinutes = rangeMinutes === 15 ? 1 : rangeMinutes === 60 ? 5 : 30
+  const bucketCount = rangeMinutes / bucketMinutes
+  const rangeStart = now - rangeMinutes * 60_000
+  const counts = Array(bucketCount).fill(0)
+
+  logs.forEach((log) => {
+    const timestamp = new Date(log.timestamp).getTime()
+    if (!Number.isFinite(timestamp) || timestamp < rangeStart || timestamp > now) return
+    const bucketIndex = Math.min(bucketCount - 1, Math.floor((timestamp - rangeStart) / (bucketMinutes * 60_000)))
+    counts[bucketIndex] += 1
+  })
+
+  const categories = counts.map((_, index) => {
+    const date = new Date(rangeStart + index * bucketMinutes * 60_000)
+    return new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
+  })
+  const totalInRange = counts.reduce((total, count) => total + count, 0)
+  const option = {
+    animationDuration: 250,
+    grid: { left: 42, right: 12, top: 16, bottom: 28 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: '#1b2029',
+      borderColor: '#343b47',
+      textStyle: { color: '#e1e5ed', fontSize: 11 },
+      formatter: (items) => `${items[0].axisValue}<br/><strong>${items[0].value}</strong> logs`,
+    },
+    xAxis: {
+      type: 'category',
+      data: categories,
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#303743' } },
+      axisLabel: {
+        color: '#778190',
+        fontSize: 9,
+        interval: Math.max(0, Math.ceil(bucketCount / 6) - 1),
+      },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      minInterval: 1,
+      splitNumber: 3,
+      axisTick: { show: false },
+      axisLine: { show: false },
+      axisLabel: { color: '#778190', fontSize: 9 },
+      splitLine: { lineStyle: { color: '#242a34', type: 'dashed' } },
+    },
+    series: [{
+      name: 'Logs',
+      type: 'bar',
+      data: counts,
+      barMaxWidth: 24,
+      showBackground: true,
+      backgroundStyle: { color: '#1a2029', borderRadius: [3, 3, 0, 0] },
+      itemStyle: { color: '#9b82f3', borderRadius: [3, 3, 0, 0] },
+      emphasis: { itemStyle: { color: '#b5a3ff' } },
+    }],
+  }
+
+  return (
+    <section className="log-volume-card" aria-label="Log volume histogram">
+      <div className="log-volume-heading">
+        <div>
+          <h2>Log volume over time</h2>
+          <span>{totalInRange.toLocaleString()} loaded events in the last {rangeMinutes} minutes</span>
+        </div>
+        <div className="log-volume-ranges" role="group" aria-label="Histogram time range">
+          {[15, 60, 360].map((minutes) => (
+            <button
+              key={minutes}
+              type="button"
+              className={rangeMinutes === minutes ? 'log-volume-range active' : 'log-volume-range'}
+              aria-pressed={rangeMinutes === minutes}
+              onClick={() => setRangeMinutes(minutes)}
+            >
+              {minutes === 15 ? '15m' : minutes === 60 ? '1h' : '6h'}
+            </button>
+          ))}
+        </div>
+      </div>
+      <Suspense fallback={<div className="log-volume-chart-loading" aria-label="Loading histogram" />}>
+        <div role="img" aria-label={`Histogram of ${totalInRange} loaded log events over the last ${rangeMinutes} minutes`}>
+          <ReactECharts option={option} notMerge lazyUpdate style={{ height: 190, width: '100%' }} />
+        </div>
+      </Suspense>
+    </section>
+  )
+}
+
 export default function ResultsTable({ logs, totalLogs, onLoadMore }) {
   const [expandedId, setExpandedId] = useState(null)
 
@@ -98,6 +194,7 @@ export default function ResultsTable({ logs, totalLogs, onLoadMore }) {
 
   return (
     <section className="results-section">
+      <LogVolumeChart logs={logs} />
       <div className="results-heading">
         <div className="results-title-group">
           <h2>Log events</h2>
