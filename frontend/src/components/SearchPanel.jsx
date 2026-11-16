@@ -60,7 +60,10 @@ export default function SearchPanel({ query, onQueryChange, onSearch }) {
               <button
                 className="filter-chip"
                 key={suggestion.label}
-                onClick={() => onQueryChange(suggestion.query)}
+                onClick={() => {
+                  onQueryChange(suggestion.query)
+                  onSearch()
+                }}
                 type="button"
               >
                 <span className={`filter-chip-dot ${suggestion.label === 'Errors' ? 'dot-error' : suggestion.label === 'Billing API' ? 'dot-blue' : 'dot-amber'}`} />
