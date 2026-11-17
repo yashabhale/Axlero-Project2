@@ -16,6 +16,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class LogIngestionValidationTest {
     @Test
@@ -44,6 +45,29 @@ class LogIngestionValidationTest {
         assertRejectedWithoutPersistence(LogMessageFixtures.validLog().toBuilder()
                 .setResponseTime(-1)
                 .build());
+    }
+
+    @Test
+    void acceptsResponseTimeBoundaryValues() {
+        RecordingLogSink sink = new RecordingLogSink();
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<IngestResponse> observer = new RecordingStreamObserver<>();
+        IngestBatchRequest request = IngestBatchRequest.newBuilder()
+                .addLogs(LogMessageFixtures.validLog().toBuilder().setResponseTime(0).build())
+                .addLogs(LogMessageFixtures.validLog().toBuilder()
+                        .setService("slow-service")
+                        .setResponseTime(Integer.MAX_VALUE)
+                        .build())
+                .build();
+
+        service.ingestBatchLogs(request, observer);
+
+        assertNull(observer.getError());
+        assertEquals(1, observer.getValues().size());
+        assertEquals(2, observer.getValues().get(0).getAcceptedCount());
+        assertEquals(1, observer.getCompletionCount());
+        assertEquals(List.of(0, Integer.MAX_VALUE),
+                sink.getAcceptedLogs().stream().map(LogMessage::getResponseTime).toList());
     }
 
     @Test
