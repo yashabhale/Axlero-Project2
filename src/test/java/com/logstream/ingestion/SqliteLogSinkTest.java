@@ -33,7 +33,9 @@ class SqliteLogSinkTest {
                     .putTags("environment", "test")
                     .putTags("region", "west")
                     .build());
-            sink.accept(log("worker", "second"));
+            sink.accept(log("worker", "second").toBuilder()
+                    .setLevel(LogLevel.ERROR)
+                    .build());
         }
 
         try (var connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
@@ -47,6 +49,7 @@ class SqliteLogSinkTest {
             assertEquals(42, logs.getInt("response_time_ms"));
             assertTrue(logs.next());
             assertEquals("worker", logs.getString("service"));
+            assertEquals("ERROR", logs.getString("level"));
             assertEquals("second", logs.getString("message"));
             assertFalse(logs.next());
         }
@@ -54,14 +57,63 @@ class SqliteLogSinkTest {
         try (var connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
              var statement = connection.createStatement();
              ResultSet tags = statement.executeQuery(
-                     "SELECT tag_key, tag_value FROM log_tags ORDER BY tag_key")) {
+                     "SELECT log_events.service, tag_key, tag_value "
+                             + "FROM log_tags JOIN log_events ON log_tags.log_id = log_events.id "
+                             + "ORDER BY tag_key")) {
             assertTrue(tags.next());
+            assertEquals("api", tags.getString("service"));
             assertEquals("environment", tags.getString("tag_key"));
             assertEquals("test", tags.getString("tag_value"));
             assertTrue(tags.next());
+            assertEquals("api", tags.getString("service"));
             assertEquals("region", tags.getString("tag_key"));
             assertEquals("west", tags.getString("tag_value"));
             assertFalse(tags.next());
+        }
+    }
+
+    @Test
+    void emptyBatchDoesNotPersistRecordsOrPreventLaterWrites() throws Exception {
+        Path databasePath = tempDirectory.resolve("empty-batch.db");
+        try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {
+            sink.acceptAll(List.of());
+            sink.accept(log("api", "after empty batch"));
+        }
+
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
+             var statement = connection.createStatement();
+             ResultSet logs = statement.executeQuery(
+                     "SELECT service, message FROM log_events ORDER BY id")) {
+            assertTrue(logs.next());
+            assertEquals("api", logs.getString("service"));
+            assertEquals("after empty batch", logs.getString("message"));
+            assertFalse(logs.next());
+        }
+    }
+
+    @Test
+    void persistsSpecialCharactersInMessagesAndTags() throws Exception {
+        Path databasePath = tempDirectory.resolve("special-characters.db");
+        String message = "can't parse 'x'; keep -- as text\nsecond line";
+        String tagKey = "owner's team";
+        String tagValue = "ops; west = 'blue'";
+
+        try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {
+            sink.accept(log("api", message).toBuilder()
+                    .putTags(tagKey, tagValue)
+                    .build());
+        }
+
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
+             var statement = connection.createStatement();
+             ResultSet logs = statement.executeQuery(
+                     "SELECT log_events.message, log_tags.tag_key, log_tags.tag_value "
+                             + "FROM log_events JOIN log_tags ON log_events.id = log_tags.log_id")) {
+            assertTrue(logs.next());
+            assertEquals(message, logs.getString("message"));
+            assertEquals(tagKey, logs.getString("tag_key"));
+            assertEquals(tagValue, logs.getString("tag_value"));
+            assertFalse(logs.next());
         }
     }
 
@@ -70,15 +122,21 @@ class SqliteLogSinkTest {
         Path databasePath = tempDirectory.resolve("logs.db");
         try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {
             LogMessage invalidLog = log(" ", "invalid");
+            LogMessage validLog = log("api", "valid").toBuilder()
+                    .putTags("environment", "test")
+                    .build();
             assertThrows(IllegalStateException.class,
-                    () -> sink.acceptAll(List.of(log("api", "valid"), invalidLog)));
+                    () -> sink.acceptAll(List.of(validLog, invalidLog)));
         }
 
         try (var connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
              var statement = connection.createStatement();
-             ResultSet logs = statement.executeQuery("SELECT COUNT(*) FROM log_events")) {
-            logs.next();
-            assertEquals(0, logs.getInt(1));
+             ResultSet counts = statement.executeQuery(
+                     "SELECT (SELECT COUNT(*) FROM log_events) AS log_count, "
+                             + "(SELECT COUNT(*) FROM log_tags) AS tag_count")) {
+            assertTrue(counts.next());
+            assertEquals(0, counts.getInt("log_count"));
+            assertEquals(0, counts.getInt("tag_count"));
         }
     }
 
