@@ -13,6 +13,7 @@ import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -139,5 +140,111 @@ class LogIngestionServiceImplTest {
         assertEquals(0, observer.getValues().size());
         assertEquals(0, observer.getCompletionCount());
         assertEquals(0, sink.getAcceptedLogs().size());
+    }
+
+    @Test
+    void streamingIngestionFlushesPendingLogsAndReturnsAcceptedCountOnCompletion() {
+        RecordingLogSink sink = new RecordingLogSink();
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<IngestResponse> observer = new RecordingStreamObserver<>();
+        List<LogMessage> logs = List.of(
+                LogMessageFixtures.validLog(),
+                LogMessageFixtures.validLog().toBuilder().setService("worker").build(),
+                LogMessageFixtures.validLog().toBuilder().setService("scheduler").build());
+        var requestObserver = service.ingestLog(observer);
+
+        logs.forEach(requestObserver::onNext);
+        requestObserver.onCompleted();
+
+        assertNull(observer.getError());
+        assertEquals(1, observer.getValues().size());
+        assertEquals(logs.size(), observer.getValues().get(0).getAcceptedCount());
+        assertEquals(1, observer.getCompletionCount());
+        assertEquals(logs, sink.getAcceptedLogs());
+        assertEquals(List.of(logs.size()), sink.getBatchSizes());
+    }
+
+    @Test
+    void emptyStreamingIngestionCompletesWithZeroAcceptedLogs() {
+        RecordingLogSink sink = new RecordingLogSink();
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<IngestResponse> observer = new RecordingStreamObserver<>();
+
+        service.ingestLog(observer).onCompleted();
+
+        assertNull(observer.getError());
+        assertEquals(1, observer.getValues().size());
+        assertEquals(0, observer.getValues().get(0).getAcceptedCount());
+        assertEquals(1, observer.getCompletionCount());
+        assertEquals(0, sink.getAcceptAllInvocationCount());
+        assertEquals(0, sink.getAcceptedLogs().size());
+    }
+
+    @Test
+    void invalidStreamingLogFlushesEarlierLogsAndTerminatesWithInvalidArgument() {
+        RecordingLogSink sink = new RecordingLogSink();
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<IngestResponse> observer = new RecordingStreamObserver<>();
+        LogMessage validLog = LogMessageFixtures.validLog();
+        var requestObserver = service.ingestLog(observer);
+
+        requestObserver.onNext(validLog);
+        requestObserver.onNext(LogMessageFixtures.validLog().toBuilder().setService(" ").build());
+        requestObserver.onNext(LogMessageFixtures.validLog().toBuilder().setService("ignored").build());
+        requestObserver.onCompleted();
+
+        StatusRuntimeException error = assertInstanceOf(StatusRuntimeException.class, observer.getError());
+        assertEquals(Status.Code.INVALID_ARGUMENT, error.getStatus().getCode());
+        assertEquals(0, observer.getValues().size());
+        assertEquals(0, observer.getCompletionCount());
+        assertEquals(List.of(validLog), sink.getAcceptedLogs());
+        assertEquals(List.of(1), sink.getBatchSizes());
+    }
+
+    @Test
+    void streamingSinkFailureDuringCompletionReturnsInternalWithoutSuccessResponse() {
+        RecordingLogSink sink = new RecordingLogSink();
+        sink.setPersistenceFailure(new IllegalStateException("simulated persistence failure"));
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<IngestResponse> observer = new RecordingStreamObserver<>();
+        var requestObserver = service.ingestLog(observer);
+
+        requestObserver.onNext(LogMessageFixtures.validLog());
+        requestObserver.onNext(LogMessageFixtures.validLog().toBuilder().setService("worker").build());
+        requestObserver.onCompleted();
+
+        StatusRuntimeException error = assertInstanceOf(StatusRuntimeException.class, observer.getError());
+        assertEquals(Status.Code.INTERNAL, error.getStatus().getCode());
+        assertEquals(0, observer.getValues().size());
+        assertEquals(0, observer.getCompletionCount());
+        assertEquals(0, sink.getAcceptedLogs().size());
+        assertEquals(List.of(2), sink.getBatchSizes());
+    }
+
+    @Test
+    void streamingIngestionFlushesAtBatchThresholdAndFlushesRemainderOnCompletion() {
+        RecordingLogSink sink = new RecordingLogSink();
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<IngestResponse> observer = new RecordingStreamObserver<>();
+        var requestObserver = service.ingestLog(observer);
+        List<LogMessage> logs = new ArrayList<>();
+
+        for (int i = 0; i < 257; i++) {
+            LogMessage log = LogMessageFixtures.validLogAt(1_730_000_000_000L + i);
+            logs.add(log);
+            requestObserver.onNext(log);
+        }
+
+        assertEquals(256, sink.getAcceptedLogs().size());
+        assertEquals(List.of(256), sink.getBatchSizes());
+
+        requestObserver.onCompleted();
+
+        assertNull(observer.getError());
+        assertEquals(1, observer.getValues().size());
+        assertEquals(257, observer.getValues().get(0).getAcceptedCount());
+        assertEquals(1, observer.getCompletionCount());
+        assertEquals(logs, sink.getAcceptedLogs());
+        assertEquals(List.of(256, 1), sink.getBatchSizes());
     }
 }
