@@ -10,27 +10,29 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
 
+/**
+ * Thread-safe in-memory {@link LogSink} for service tests.
+ */
 public final class RecordingLogSink implements LogSink {
     private static final long MILLIS_PER_MINUTE = 60_000L;
 
     private final List<LogMessage> acceptedLogs = new ArrayList<>();
-    private final List<Integer> batchSizes = new ArrayList<>();
+    private final List<List<LogMessage>> batches = new ArrayList<>();
     private RuntimeException persistenceFailure;
-    private int acceptAllInvocationCount;
 
     @Override
     public synchronized void accept(LogMessage logMessage) {
+        LogMessage acceptedLog = Objects.requireNonNull(logMessage, "logMessage");
         throwIfPersistenceFails();
-        acceptedLogs.add(Objects.requireNonNull(logMessage, "logMessage"));
+        acceptedLogs.add(acceptedLog);
     }
 
     @Override
     public synchronized void acceptAll(List<LogMessage> logMessages) {
-        Objects.requireNonNull(logMessages, "logMessages");
-        acceptAllInvocationCount++;
-        batchSizes.add(logMessages.size());
+        List<LogMessage> batch = List.copyOf(Objects.requireNonNull(logMessages, "logMessages"));
+        batches.add(batch);
         throwIfPersistenceFails();
-        acceptedLogs.addAll(logMessages);
+        acceptedLogs.addAll(batch);
     }
 
     @Override
@@ -52,20 +54,46 @@ public final class RecordingLogSink implements LogSink {
         return List.copyOf(buckets);
     }
 
+    /**
+     * Returns an immutable snapshot of successfully accepted logs.
+     *
+     * @return accepted log messages
+     */
     public synchronized List<LogMessage> getAcceptedLogs() {
         return List.copyOf(acceptedLogs);
     }
 
+    /**
+     * Returns the number of {@link #acceptAll(List)} calls, including calls that failed.
+     *
+     * @return batch call count
+     */
     public synchronized int getAcceptAllInvocationCount() {
-        return acceptAllInvocationCount;
+        return batches.size();
     }
 
+    /**
+     * Returns the sizes of all attempted batches in call order.
+     *
+     * @return batch sizes
+     */
     public synchronized List<Integer> getBatchSizes() {
-        return List.copyOf(batchSizes);
+        return batches.stream().map(List::size).toList();
+    }
+
+    /**
+     * Returns immutable snapshots of all attempted batches in call order.
+     *
+     * @return attempted batches, including any that failed to persist
+     */
+    public synchronized List<List<LogMessage>> getBatches() {
+        return List.copyOf(batches);
     }
 
     /**
      * Configures a failure for subsequent persistence calls; pass {@code null} to clear it.
+     *
+     * @param persistenceFailure exception to throw, or {@code null} to disable failures
      */
     public synchronized void setPersistenceFailure(RuntimeException persistenceFailure) {
         this.persistenceFailure = persistenceFailure;
