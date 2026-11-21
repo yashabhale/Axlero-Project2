@@ -1,6 +1,8 @@
 package com.logstream.ingestion.service;
 
 import com.logstream.ingestion.LogIngestionServiceImpl;
+import com.logstream.ingestion.LogSink;
+import com.logstream.ingestion.TimeSeriesBucket;
 import com.logstream.ingestion.fixtures.LogMessageFixtures;
 import com.logstream.ingestion.fixtures.RecordingLogSink;
 import com.logstream.ingestion.fixtures.RecordingStreamObserver;
@@ -8,6 +10,7 @@ import com.logstream.ingestion.v1.IngestBatchRequest;
 import com.logstream.ingestion.v1.IngestResponse;
 import com.logstream.ingestion.v1.LogCountRequest;
 import com.logstream.ingestion.v1.LogCountResponse;
+import com.logstream.ingestion.v1.LogLevel;
 import com.logstream.ingestion.v1.LogMessage;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -105,6 +108,65 @@ class LogIngestionServiceImplTest {
     }
 
     @Test
+    void aggregationCountsIdenticalTimestampsAcrossServicesAndLevels() {
+        RecordingLogSink sink = new RecordingLogSink();
+        long minuteStart = 1_730_000_000_000L / 60_000 * 60_000;
+        long timestamp = minuteStart + 10_000;
+        sink.acceptAll(List.of(
+                LogMessageFixtures.validLogAt(timestamp),
+                LogMessageFixtures.validLogAt(timestamp).toBuilder()
+                        .setService("worker")
+                        .setLevel(LogLevel.ERROR)
+                        .build(),
+                LogMessageFixtures.validLogAt(minuteStart + 59_999).toBuilder()
+                        .setService("scheduler")
+                        .setLevel(LogLevel.WARN)
+                        .build()));
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<LogCountResponse> observer = new RecordingStreamObserver<>();
+        LogCountRequest request = LogCountRequest.newBuilder()
+                .setStartTimestampMs(minuteStart)
+                .setEndTimestampMs(minuteStart + 60_000)
+                .build();
+
+        service.getLogCountsByMinute(request, observer);
+
+        assertNull(observer.getError());
+        assertEquals(1, observer.getValues().size());
+        LogCountResponse response = observer.getValues().get(0);
+        assertEquals(1, response.getBucketsCount());
+        assertEquals(minuteStart, response.getBuckets(0).getMinuteStartMs());
+        assertEquals(3, response.getBuckets(0).getCount());
+        assertEquals(1, observer.getCompletionCount());
+    }
+
+    @Test
+    void emptyAggregationReturnsZeroCountBucketsAndCompletesObserver() {
+        RecordingLogSink sink = new RecordingLogSink();
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<LogCountResponse> observer = new RecordingStreamObserver<>();
+        long firstMinute = 1_730_000_000_000L / 60_000 * 60_000;
+        LogCountRequest request = LogCountRequest.newBuilder()
+                .setStartTimestampMs(firstMinute)
+                .setEndTimestampMs(firstMinute + 180_000)
+                .build();
+
+        service.getLogCountsByMinute(request, observer);
+
+        assertNull(observer.getError());
+        assertEquals(1, observer.getValues().size());
+        LogCountResponse response = observer.getValues().get(0);
+        assertEquals(3, response.getBucketsCount());
+        assertEquals(firstMinute, response.getBuckets(0).getMinuteStartMs());
+        assertEquals(0, response.getBuckets(0).getCount());
+        assertEquals(firstMinute + 60_000, response.getBuckets(1).getMinuteStartMs());
+        assertEquals(0, response.getBuckets(1).getCount());
+        assertEquals(firstMinute + 120_000, response.getBuckets(2).getMinuteStartMs());
+        assertEquals(0, response.getBuckets(2).getCount());
+        assertEquals(1, observer.getCompletionCount());
+    }
+
+    @Test
     void emptyAggregationRangeReturnsInvalidArgumentWithoutSuccessResponse() {
         RecordingLogSink sink = new RecordingLogSink();
         LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
@@ -119,6 +181,33 @@ class LogIngestionServiceImplTest {
 
         StatusRuntimeException error = assertInstanceOf(StatusRuntimeException.class, observer.getError());
         assertEquals(Status.Code.INVALID_ARGUMENT, error.getStatus().getCode());
+        assertEquals(0, observer.getValues().size());
+        assertEquals(0, observer.getCompletionCount());
+    }
+
+    @Test
+    void aggregationSinkFailureReturnsInternalWithoutSuccessResponse() {
+        LogSink sink = new LogSink() {
+            @Override
+            public void accept(LogMessage logMessage) {
+            }
+
+            @Override
+            public List<TimeSeriesBucket> countLogsByMinute(long startTimestampMs, long endTimestampMs) {
+                throw new IllegalStateException("simulated aggregation failure");
+            }
+        };
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<LogCountResponse> observer = new RecordingStreamObserver<>();
+        LogCountRequest request = LogCountRequest.newBuilder()
+                .setStartTimestampMs(1_730_000_000_000L)
+                .setEndTimestampMs(1_730_000_060_000L)
+                .build();
+
+        service.getLogCountsByMinute(request, observer);
+
+        StatusRuntimeException error = assertInstanceOf(StatusRuntimeException.class, observer.getError());
+        assertEquals(Status.Code.INTERNAL, error.getStatus().getCode());
         assertEquals(0, observer.getValues().size());
         assertEquals(0, observer.getCompletionCount());
     }

@@ -158,6 +158,40 @@ class SqliteLogSinkTest {
     }
 
     @Test
+    void aggregatesMultipleMinutesWithHalfOpenBoundariesAndChronologicalOrdering() throws Exception {
+        Path databasePath = tempDirectory.resolve("boundary-aggregation.db");
+        long firstMinute = 1_730_000_000_000L / 60_000 * 60_000;
+        long start = firstMinute + 10;
+        long end = firstMinute + 120_000;
+        try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {
+            sink.accept(logAt("excluded-before", "before start", start - 1));
+            sink.accept(logAt("api", "at start", start));
+            sink.accept(logAt("worker", "same timestamp", start).toBuilder()
+                    .setLevel(LogLevel.ERROR)
+                    .build());
+            sink.accept(logAt("api", "before minute boundary", firstMinute + 59_999)
+                    .toBuilder()
+                    .setLevel(LogLevel.WARN)
+                    .build());
+            sink.accept(logAt("worker", "at minute boundary", firstMinute + 60_000)
+                    .toBuilder()
+                    .setLevel(LogLevel.DEBUG)
+                    .build());
+            sink.accept(logAt("scheduler", "before end", end - 1));
+            sink.accept(logAt("excluded-at-end", "at end", end));
+            sink.accept(logAt("excluded-after", "after end", end + 1));
+
+            List<TimeSeriesBucket> buckets = sink.countLogsByMinute(start, end);
+
+            assertEquals(2, buckets.size());
+            assertEquals(firstMinute, buckets.get(0).minuteStartMs());
+            assertEquals(3, buckets.get(0).count());
+            assertEquals(firstMinute + 60_000, buckets.get(1).minuteStartMs());
+            assertEquals(2, buckets.get(1).count());
+        }
+    }
+
+    @Test
     void grpcAggregationReturnsZeroCountBucketsForEmptyMinutes() throws Exception {
         long start = 1_730_000_000_000L / 60_000 * 60_000;
         try (SqliteLogSink sink = new SqliteLogSink(tempDirectory.resolve("logs.db"))) {
