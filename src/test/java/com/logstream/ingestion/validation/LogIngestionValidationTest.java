@@ -27,6 +27,13 @@ class LogIngestionValidationTest {
     }
 
     @Test
+    void rejectsUnrecognizedLogLevel() {
+        assertRejectedWithoutPersistence(LogMessageFixtures.validLog().toBuilder()
+                .setLevelValue(99)
+                .build());
+    }
+
+    @Test
     void rejectsBlankServiceName() {
         assertRejectedWithoutPersistence(LogMessageFixtures.validLog().toBuilder()
                 .setService("  ")

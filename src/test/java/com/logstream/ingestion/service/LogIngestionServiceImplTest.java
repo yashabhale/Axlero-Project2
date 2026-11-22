@@ -186,6 +186,44 @@ class LogIngestionServiceImplTest {
     }
 
     @Test
+    void negativeAggregationStartReturnsInvalidArgumentWithoutSuccessResponse() {
+        RecordingLogSink sink = new RecordingLogSink();
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<LogCountResponse> observer = new RecordingStreamObserver<>();
+        LogCountRequest request = LogCountRequest.newBuilder()
+                .setStartTimestampMs(-1)
+                .setEndTimestampMs(1_730_000_000_000L)
+                .build();
+
+        service.getLogCountsByMinute(request, observer);
+
+        StatusRuntimeException error = assertInstanceOf(StatusRuntimeException.class, observer.getError());
+        assertEquals(Status.Code.INVALID_ARGUMENT, error.getStatus().getCode());
+        assertEquals(0, observer.getValues().size());
+        assertEquals(0, observer.getCompletionCount());
+    }
+
+    @Test
+    void aggregationRangeOverThirtyOneDaysReturnsInvalidArgumentWithoutSuccessResponse() {
+        RecordingLogSink sink = new RecordingLogSink();
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<LogCountResponse> observer = new RecordingStreamObserver<>();
+        long startTimestamp = 1_730_000_000_000L;
+        long thirtyOneDaysMs = 31L * 24 * 60 * 60_000;
+        LogCountRequest request = LogCountRequest.newBuilder()
+                .setStartTimestampMs(startTimestamp)
+                .setEndTimestampMs(startTimestamp + thirtyOneDaysMs + 1)
+                .build();
+
+        service.getLogCountsByMinute(request, observer);
+
+        StatusRuntimeException error = assertInstanceOf(StatusRuntimeException.class, observer.getError());
+        assertEquals(Status.Code.INVALID_ARGUMENT, error.getStatus().getCode());
+        assertEquals(0, observer.getValues().size());
+        assertEquals(0, observer.getCompletionCount());
+    }
+
+    @Test
     void aggregationSinkFailureReturnsInternalWithoutSuccessResponse() {
         LogSink sink = new LogSink() {
             @Override
@@ -229,6 +267,37 @@ class LogIngestionServiceImplTest {
         assertEquals(0, observer.getValues().size());
         assertEquals(0, observer.getCompletionCount());
         assertEquals(0, sink.getAcceptedLogs().size());
+    }
+
+    @Test
+    void serviceAcceptsBatchAfterEarlierPersistenceFailure() {
+        RecordingLogSink sink = new RecordingLogSink();
+        sink.setPersistenceFailure(new IllegalStateException("simulated persistence failure"));
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        IngestBatchRequest request = IngestBatchRequest.newBuilder()
+                .addLogs(LogMessageFixtures.validLog())
+                .build();
+        RecordingStreamObserver<IngestResponse> failedObserver = new RecordingStreamObserver<>();
+
+        service.ingestBatchLogs(request, failedObserver);
+
+        StatusRuntimeException error = assertInstanceOf(
+                StatusRuntimeException.class,
+                failedObserver.getError());
+        assertEquals(Status.Code.INTERNAL, error.getStatus().getCode());
+        assertEquals(0, failedObserver.getValues().size());
+        assertEquals(0, failedObserver.getCompletionCount());
+
+        sink.setPersistenceFailure(null);
+        RecordingStreamObserver<IngestResponse> retryObserver = new RecordingStreamObserver<>();
+
+        service.ingestBatchLogs(request, retryObserver);
+
+        assertNull(retryObserver.getError());
+        assertEquals(1, retryObserver.getValues().size());
+        assertEquals(1, retryObserver.getValues().get(0).getAcceptedCount());
+        assertEquals(1, retryObserver.getCompletionCount());
+        assertEquals(List.of(request.getLogs(0)), sink.getAcceptedLogs());
     }
 
     @Test
