@@ -276,6 +276,21 @@ class LogIngestionGrpcIntegrationTest {
     }
 
     @Test
+    void mixedValidAndInvalidBatchReturnsInvalidArgumentWithoutPartialPersistence() throws SQLException {
+        IngestBatchRequest request = IngestBatchRequest.newBuilder()
+                .addLogs(LogMessageFixtures.validLog().toBuilder().setService("valid-first").build())
+                .addLogs(LogMessageFixtures.validLog().toBuilder().setMessage(" ").build())
+                .build();
+
+        StatusRuntimeException error = assertThrows(
+                StatusRuntimeException.class,
+                () -> blockingStub.ingestBatchLogs(request));
+
+        assertEquals(Status.Code.INVALID_ARGUMENT, error.getStatus().getCode());
+        assertEquals(0, readPersistedLogCount());
+    }
+
+    @Test
     void emptyBatchReturnsZeroAcceptedAndPersistsNothing() throws SQLException {
         IngestResponse response = blockingStub.ingestBatchLogs(IngestBatchRequest.getDefaultInstance());
 
