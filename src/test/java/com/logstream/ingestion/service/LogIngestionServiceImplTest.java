@@ -424,4 +424,25 @@ class LogIngestionServiceImplTest {
         assertEquals(logs, sink.getAcceptedLogs());
         assertEquals(List.of(256, 1), sink.getBatchSizes());
     }
+
+    @Test
+    void streamingSinkFailureAtBatchThresholdReturnsInternal() {
+        RecordingLogSink sink = new RecordingLogSink();
+        sink.setPersistenceFailure(new IllegalStateException("simulated persistence failure"));
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<IngestResponse> observer = new RecordingStreamObserver<>();
+        var requestObserver = service.ingestLog(observer);
+
+        for (int i = 0; i < 256; i++) {
+            requestObserver.onNext(LogMessageFixtures.validLogAt(1_730_000_000_000L + i));
+        }
+        requestObserver.onCompleted();
+
+        StatusRuntimeException error = assertInstanceOf(StatusRuntimeException.class, observer.getError());
+        assertEquals(Status.Code.INTERNAL, error.getStatus().getCode());
+        assertEquals(0, observer.getValues().size());
+        assertEquals(0, observer.getCompletionCount());
+        assertEquals(0, sink.getAcceptedLogs().size());
+        assertEquals(List.of(256), sink.getBatchSizes());
+    }
 }
