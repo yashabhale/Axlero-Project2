@@ -402,6 +402,22 @@ class LogIngestionGrpcIntegrationTest {
         assertEquals(Status.Code.INVALID_ARGUMENT, error.getStatus().getCode());
     }
 
+    @Test
+    void aggregationRangeOverThirtyOneDaysReturnsInvalidArgument() {
+        long startTimestamp = 1_730_000_000_000L;
+        long thirtyOneDaysMs = 31L * 24 * 60 * 60_000;
+        LogCountRequest request = LogCountRequest.newBuilder()
+                .setStartTimestampMs(startTimestamp)
+                .setEndTimestampMs(startTimestamp + thirtyOneDaysMs + 1)
+                .build();
+
+        StatusRuntimeException error = assertThrows(
+                StatusRuntimeException.class,
+                () -> blockingStub.getLogCountsByMinute(request));
+
+        assertEquals(Status.Code.INVALID_ARGUMENT, error.getStatus().getCode());
+    }
+
     private List<String> readPersistedLogs() throws SQLException {
         List<String> persistedLogs = new ArrayList<>();
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
