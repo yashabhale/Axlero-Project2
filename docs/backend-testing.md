@@ -74,7 +74,7 @@ Using one known-good default reduces test setup duplication. Tests can use proto
 
 ## 6. Service-Level Testing
 
-`LogIngestionServiceImplTest` directly invokes the service with `RecordingLogSink` and `RecordingStreamObserver`. It covers successful batch responses and tag preservation; aggregation counts, chronological buckets, zero-count minutes, and invalid ranges; batch persistence failures and retry; and client-streaming completion, empty streams, invalid messages, sink failures, and the 256-message flush threshold with a final remainder. These tests verify service behavior and observer notifications without starting a network server.
+`LogIngestionServiceImplTest` directly invokes the service with `RecordingLogSink` and `RecordingStreamObserver`. It covers successful batch responses and tag preservation; aggregation counts, chronological buckets, zero-count minutes, and invalid ranges; batch persistence failures and retry; and client-streaming completion, empty streams, invalid messages, sink failures, and the 256-message flush threshold with a final remainder. Streaming error cases also verify that a failed flush before rejecting an invalid message returns `INTERNAL`, a failure at the 256-message threshold returns `INTERNAL`, and an interrupted request flushes pending logs without a success response. These tests verify service behavior and observer notifications without starting a network server.
 
 ## 7. Log Validation Testing
 
@@ -90,7 +90,7 @@ For invalid requests, the tests verify gRPC `INVALID_ARGUMENT`, no success respo
 
 ## 8. Batch Ingestion Testing
 
-`LogIngestionBatchTest` focuses on batch-specific behavior. It verifies that an empty batch succeeds with an accepted count of zero, valid single- and multi-record batches preserve their messages and report the correct count, an invalid record rejects the entire batch before persistence, and a simulated persistence failure returns `INTERNAL` without a success response. The integration test also sends a valid multi-record batch through the blocking gRPC stub and checks its accepted count and persisted rows.
+`LogIngestionBatchTest` focuses on batch-specific behavior. It verifies that an empty batch succeeds with an accepted count of zero, valid single- and multi-record batches preserve their messages and report the correct count, an invalid record rejects the entire batch before persistence, and a simulated persistence failure returns `INTERNAL` without a success response. The integration tests send valid multi-record batches through the blocking gRPC stub and check accepted counts and persisted rows, including tag-to-log associations. They also verify that a mixed valid/invalid batch returns `INVALID_ARGUMENT` without partially persisting the valid log.
 
 The tests also inspect attempted batch sizes and `acceptAll` invocation counts, distinguishing validation rejection (no sink call) from a persistence failure (one attempted sink call). The class uses `LogMessageFixtures`, `RecordingLogSink`, and `RecordingStreamObserver`. Empty-batch behavior is also covered over gRPC by the integration test.
 
@@ -98,7 +98,7 @@ The tests also inspect attempted batch sizes and `acceptAll` invocation counts, 
 
 `LogIngestionServiceImplTest` verifies streaming behavior directly: successful completion and accepted counts, an empty stream, flushing 256 messages plus a one-message remainder, persistence of earlier valid messages before an invalid message returns `INVALID_ARGUMENT`, and `INTERNAL` on a sink failure at completion.
 
-`LogIngestionGrpcIntegrationTest` additionally sends multiple messages through the generated asynchronous client-streaming stub and checks the accepted count and persisted rows. Its invalid-stream test sends a valid log followed by an invalid one, waits with a bounded latch for the RPC error, and verifies `INVALID_ARGUMENT`, no successful response/completion, and persistence of only the earlier valid log.
+`LogIngestionGrpcIntegrationTest` additionally sends multiple messages through the generated asynchronous client-streaming stub and checks the accepted count and persisted rows. It verifies that an empty stream completes successfully with zero accepted logs and that no rows are persisted. Its invalid-stream test sends a valid log followed by an invalid one, waits with a bounded latch for the RPC error, and verifies `INVALID_ARGUMENT`, no successful response/completion, and persistence of only the earlier valid log.
 
 For each test, `@BeforeEach` creates a `SqliteLogSink` using a database file in JUnit's `@TempDir`, starts `ServerBuilder.forPort(0)`, and creates generated blocking and asynchronous client stubs with five-second RPC deadlines. `@AfterEach` shuts down and awaits the channel and server, escalating to `shutdownNow()` only if needed, then closes the sink. JUnit removes the temporary directory after the test.
 
@@ -106,13 +106,13 @@ The service also attempts a best-effort flush when the inbound stream is cancell
 
 ## 10. SQLite Persistence Testing
 
-`SqliteLogSinkTest` uses JUnit's `@TempDir` for isolated file-backed databases and try-with-resources for sinks and JDBC connections. It verifies that log fields and tag key/value pairs remain readable through new JDBC connections after the sink closes (persistence across connections), that special characters are stored intact, and that an empty write does not prevent later writes.
+`SqliteLogSinkTest` uses JUnit's `@TempDir` for isolated file-backed databases and try-with-resources for sinks and JDBC connections. It verifies nested parent-directory creation, persistence through a newly opened sink and new JDBC connections, special-character storage, and that an empty write does not prevent later writes.
 
-The rollback test submits a valid record followed by one that violates the SQLite schema and checks that neither the record nor its tags remain persisted. Aggregation tests verify SQLite minute grouping, chronological ordering, and half-open `[start, end)` boundaries: records before `start` and at or after `end` are excluded. A direct service call backed by SQLite also verifies that aggregation includes empty minutes as zero-count buckets.
+Rollback tests submit a valid record followed by one that violates the SQLite schema. They verify that the failed batch leaves none of its records or tags persisted and does not remove a record committed before that batch. Aggregation tests verify empty-database results, SQLite minute grouping, chronological ordering, and half-open `[start, end)` boundaries: records before `start` and at or after `end` are excluded. A direct service call backed by SQLite also verifies that aggregation includes empty minutes as zero-count buckets.
 
 ## 11. Error Handling and Edge Cases
 
-Service tests cover invalid batch fields, mixed-validity batches, sink failures, invalid streaming messages, and invalid aggregation ranges. The gRPC integration tests verify `INVALID_ARGUMENT` over the transport for an invalid batch, an invalid streamed log, and an aggregation request whose start equals its end. The streaming integration test also checks the service contract of flushing an earlier valid record before rejecting the invalid one. SQLite constraint failure and transaction rollback are covered by `SqliteLogSinkTest`.
+Service tests cover invalid batch fields, mixed-validity batches, sink failures, invalid streaming messages, interrupted streams, and invalid aggregation ranges. The gRPC integration tests verify `INVALID_ARGUMENT` over the transport for a single invalid batch, a mixed valid/invalid batch, an invalid streamed log, and aggregation requests with equal or reversed bounds, a negative start, or a range over 31 days. The streaming integration test also checks the service contract of flushing an earlier valid record before rejecting the invalid one. SQLite constraint failure and transaction rollback are covered by `SqliteLogSinkTest`.
 
 The integration test verifies that an empty batch succeeds with accepted count zero and persists no rows. The unit batch test separately checks its observer completion and sink invocation behavior.
 
@@ -120,7 +120,7 @@ The integration test verifies that an empty batch succeeds with accepted count z
 
 The service validates that an aggregation start time is non-negative, the end is greater than the start, and the range does not exceed 31 days. It returns a bucket for each minute intersecting the half-open interval `[start, end)`, fills missing minutes with zero, and orders response buckets chronologically.
 
-`LogIngestionServiceImplTest` checks exact counts, multiple minutes, zero-filled buckets, and invalid ranges including a negative start and a range longer than 31 days. `SqliteLogSinkTest` verifies grouped counts and half-open interval boundaries, including exclusion of a record at `end`. The gRPC integration test inserts deterministic logs through the client, checks exact counts and chronological buckets over gRPC, and separately verifies an equal-boundary request returns `INVALID_ARGUMENT`.
+`LogIngestionServiceImplTest` checks exact counts, multiple minutes, zero-filled buckets, and invalid ranges including a negative start and a range longer than 31 days. `SqliteLogSinkTest` verifies grouped counts and half-open interval boundaries, including exclusion of a record at `end`. The gRPC integration test inserts deterministic logs through the client, checks exact counts and chronological buckets, verifies half-open range behavior, and checks that equal, reversed, negative-start, and over-31-day ranges return `INVALID_ARGUMENT`.
 
 ## 13. How to Run Tests
 
@@ -145,8 +145,8 @@ The repository does not contain a Maven wrapper. The test code has not been exec
 ## 14. Current Limitations
 
 - The integration test starts a real gRPC server with `ServerBuilder.forPort(0)` and the production service, but does not invoke `LogIngestionServer.main` or verify its environment-variable/default-port startup behavior.
-- The streaming cancellation/transport failure callback and some persistence failure paths are not explicitly tested over gRPC.
-- The integration suite checks equal aggregation bounds; a reversed range is not tested over the transport. Service-level tests cover negative starts and ranges longer than 31 days.
+- Stream interruption is tested at the service observer level, but not by cancelling a real gRPC client stream. Persistence failures are simulated in service tests rather than induced through the integration server.
+- The integration suite rejects ranges longer than 31 days; acceptance at the exact 31-day limit is not explicitly tested.
 - SQLite tests do not cover concurrent access, connection setup failures, or every schema and tag relationship constraint.
 - The test code has not been executed or verified as part of this documentation task, so no passing status is claimed.
 
@@ -154,9 +154,9 @@ The repository does not contain a Maven wrapper. The test code has not been exec
 
 Potential additions, clearly outside current coverage, include:
 
-- Streaming tests for cancellation and additional transport/persistence failure paths.
+- A real gRPC client-cancellation test and additional transport-level persistence failure cases.
 - A gRPC integration test for `LogIngestionServer.main` startup configuration, if that lifecycle is made testable without relying on fixed ports or production database files.
-- A reversed-range aggregation integration case and broader SQLite concurrency, connection-failure, and schema relationship tests.
+- Exact 31-day aggregation-limit acceptance and broader SQLite concurrency, connection-failure, and schema relationship tests.
 
 ## 16. Conclusion
 
