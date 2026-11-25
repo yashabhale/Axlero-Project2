@@ -182,6 +182,51 @@ class LogIngestionGrpcIntegrationTest {
     }
 
     @Test
+    void invalidClientStreamingLogReturnsInvalidArgumentAndPersistsOnlyEarlierValidLogs()
+            throws InterruptedException, SQLException {
+        LogMessage validLog = LogMessageFixtures.validLog().toBuilder()
+                .setService("stream-before-invalid")
+                .setMessage("valid log before invalid input")
+                .build();
+        LogMessage invalidLog = LogMessageFixtures.validLog().toBuilder()
+                .setService(" ")
+                .build();
+        AtomicReference<IngestResponse> response = new AtomicReference<>();
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        AtomicInteger completionCount = new AtomicInteger();
+        CountDownLatch responseTerminated = new CountDownLatch(1);
+        StreamObserver<IngestResponse> responseObserver = new StreamObserver<>() {
+            @Override
+            public void onNext(IngestResponse value) {
+                response.set(value);
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                error.set(throwable);
+                responseTerminated.countDown();
+            }
+
+            @Override
+            public void onCompleted() {
+                completionCount.incrementAndGet();
+                responseTerminated.countDown();
+            }
+        };
+        StreamObserver<LogMessage> requestObserver = asyncStub.ingestLog(responseObserver);
+
+        requestObserver.onNext(validLog);
+        requestObserver.onNext(invalidLog);
+
+        assertTrue(responseTerminated.await(RPC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+        assertNotNull(error.get());
+        assertEquals(Status.Code.INVALID_ARGUMENT, Status.fromThrowable(error.get()).getCode());
+        assertNull(response.get());
+        assertEquals(0, completionCount.get());
+        assertEquals(List.of("stream-before-invalid:valid log before invalid input"), readPersistedLogs());
+    }
+
+    @Test
     void invalidBatchReturnsInvalidArgumentAndPersistsNothing() throws SQLException {
         IngestBatchRequest request = IngestBatchRequest.newBuilder()
                 .addLogs(LogMessageFixtures.validLog().toBuilder().setService(" ").build())
@@ -192,6 +237,14 @@ class LogIngestionGrpcIntegrationTest {
                 () -> blockingStub.ingestBatchLogs(request));
 
         assertEquals(Status.Code.INVALID_ARGUMENT, error.getStatus().getCode());
+        assertEquals(0, readPersistedLogCount());
+    }
+
+    @Test
+    void emptyBatchReturnsZeroAcceptedAndPersistsNothing() throws SQLException {
+        IngestResponse response = blockingStub.ingestBatchLogs(IngestBatchRequest.getDefaultInstance());
+
+        assertEquals(0, response.getAcceptedCount());
         assertEquals(0, readPersistedLogCount());
     }
 
@@ -217,6 +270,21 @@ class LogIngestionGrpcIntegrationTest {
         assertEquals(1, response.getBuckets(1).getCount());
         assertEquals(firstMinute + 120_000, response.getBuckets(2).getMinuteStartMs());
         assertEquals(0, response.getBuckets(2).getCount());
+    }
+
+    @Test
+    void invalidAggregationRangeReturnsInvalidArgument() {
+        long timestamp = 1_730_000_000_000L;
+        LogCountRequest request = LogCountRequest.newBuilder()
+                .setStartTimestampMs(timestamp)
+                .setEndTimestampMs(timestamp)
+                .build();
+
+        StatusRuntimeException error = assertThrows(
+                StatusRuntimeException.class,
+                () -> blockingStub.getLogCountsByMinute(request));
+
+        assertEquals(Status.Code.INVALID_ARGUMENT, error.getStatus().getCode());
     }
 
     private List<String> readPersistedLogs() throws SQLException {
