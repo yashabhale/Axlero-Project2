@@ -8,6 +8,7 @@ import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -24,6 +25,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SqliteLogSinkTest {
     @TempDir
     Path tempDirectory;
+
+    @Test
+    void createsMissingParentDirectoriesForDatabase() throws Exception {
+        Path databasePath = tempDirectory.resolve("nested").resolve("directory").resolve("logs.db");
+
+        try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {
+            sink.accept(log("api", "nested database"));
+        }
+
+        assertTrue(Files.isDirectory(databasePath.getParent()));
+        assertTrue(Files.isRegularFile(databasePath));
+    }
 
     @Test
     void persistsLogsAndTagsAcrossConnections() throws Exception {
