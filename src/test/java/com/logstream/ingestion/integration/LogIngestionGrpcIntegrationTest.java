@@ -140,6 +140,42 @@ class LogIngestionGrpcIntegrationTest {
     }
 
     @Test
+    void batchIngestionPreservesTagAssociationsOverGrpc() throws SQLException {
+        List<LogMessage> logs = List.of(
+                LogMessageFixtures.validLog().toBuilder()
+                        .setService("api")
+                        .putTags("environment", "test")
+                        .putTags("team", "platform")
+                        .build(),
+                LogMessageFixtures.validLog().toBuilder()
+                        .setService("worker")
+                        .putTags("environment", "staging")
+                        .build());
+
+        IngestResponse response = blockingStub.ingestBatchLogs(
+                IngestBatchRequest.newBuilder().addAllLogs(logs).build());
+
+        assertEquals(2, response.getAcceptedCount());
+        List<String> persistedTags = new ArrayList<>();
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
+             Statement statement = connection.createStatement();
+             ResultSet tags = statement.executeQuery(
+                     "SELECT log_events.service, log_tags.tag_key, log_tags.tag_value "
+                             + "FROM log_tags JOIN log_events ON log_tags.log_id = log_events.id "
+                             + "ORDER BY log_events.service, log_tags.tag_key")) {
+            while (tags.next()) {
+                persistedTags.add(tags.getString("service") + ":"
+                        + tags.getString("tag_key") + "=" + tags.getString("tag_value"));
+            }
+        }
+
+        assertEquals(List.of(
+                "api:environment=test",
+                "api:team=platform",
+                "worker:environment=staging"), persistedTags);
+    }
+
+    @Test
     void clientStreamingIngestionPersistsLogsAndReturnsAcceptedCount() throws InterruptedException, SQLException {
         List<LogMessage> logs = List.of(
                 LogMessageFixtures.validLog().toBuilder().setService("stream-a").build(),
