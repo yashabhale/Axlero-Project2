@@ -211,6 +211,14 @@ class SqliteLogSinkTest {
     }
 
     @Test
+    void emptyDatabaseReturnsNoPersistedAggregationBuckets() throws Exception {
+        long start = 1_730_000_000_000L;
+        try (SqliteLogSink sink = new SqliteLogSink(tempDirectory.resolve("empty-aggregation.db"))) {
+            assertTrue(sink.countLogsByMinute(start, start + 60_000).isEmpty());
+        }
+    }
+
+    @Test
     void aggregatesMultipleMinutesWithHalfOpenBoundariesAndChronologicalOrdering() throws Exception {
         Path databasePath = tempDirectory.resolve("boundary-aggregation.db");
         long firstMinute = 1_730_000_000_000L / 60_000 * 60_000;
