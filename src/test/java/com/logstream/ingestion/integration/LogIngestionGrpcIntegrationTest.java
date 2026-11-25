@@ -359,6 +359,29 @@ class LogIngestionGrpcIntegrationTest {
     }
 
     @Test
+    void aggregationUsesHalfOpenTimestampRangeOverGrpc() {
+        long firstMinute = 1_730_000_000_000L / 60_000 * 60_000;
+        long start = firstMinute + 10;
+        long end = firstMinute + 60_000;
+        blockingStub.ingestBatchLogs(IngestBatchRequest.newBuilder()
+                .addLogs(LogMessageFixtures.validLogAt(start - 1))
+                .addLogs(LogMessageFixtures.validLogAt(start))
+                .addLogs(LogMessageFixtures.validLogAt(end - 1))
+                .addLogs(LogMessageFixtures.validLogAt(end))
+                .build());
+
+        LogCountResponse response = blockingStub.getLogCountsByMinute(
+                LogCountRequest.newBuilder()
+                        .setStartTimestampMs(start)
+                        .setEndTimestampMs(end)
+                        .build());
+
+        assertEquals(1, response.getBucketsCount());
+        assertEquals(firstMinute, response.getBuckets(0).getMinuteStartMs());
+        assertEquals(2, response.getBuckets(0).getCount());
+    }
+
+    @Test
     void invalidAggregationRangeReturnsInvalidArgument() {
         long timestamp = 1_730_000_000_000L;
         LogCountRequest request = LogCountRequest.newBuilder()
