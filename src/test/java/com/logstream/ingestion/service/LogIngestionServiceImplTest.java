@@ -360,6 +360,25 @@ class LogIngestionServiceImplTest {
     }
 
     @Test
+    void invalidStreamingLogReturnsInternalWhenFlushingEarlierLogsFails() {
+        RecordingLogSink sink = new RecordingLogSink();
+        sink.setPersistenceFailure(new IllegalStateException("simulated persistence failure"));
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<IngestResponse> observer = new RecordingStreamObserver<>();
+        var requestObserver = service.ingestLog(observer);
+
+        requestObserver.onNext(LogMessageFixtures.validLog());
+        requestObserver.onNext(LogMessageFixtures.validLog().toBuilder().setService(" ").build());
+
+        StatusRuntimeException error = assertInstanceOf(StatusRuntimeException.class, observer.getError());
+        assertEquals(Status.Code.INTERNAL, error.getStatus().getCode());
+        assertEquals(0, observer.getValues().size());
+        assertEquals(0, observer.getCompletionCount());
+        assertEquals(0, sink.getAcceptedLogs().size());
+        assertEquals(List.of(1), sink.getBatchSizes());
+    }
+
+    @Test
     void streamingSinkFailureDuringCompletionReturnsInternalWithoutSuccessResponse() {
         RecordingLogSink sink = new RecordingLogSink();
         sink.setPersistenceFailure(new IllegalStateException("simulated persistence failure"));
