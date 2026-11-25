@@ -339,6 +339,26 @@ class LogIngestionServiceImplTest {
     }
 
     @Test
+    void interruptedStreamingFlushesPendingLogsWithoutSuccessResponse() {
+        RecordingLogSink sink = new RecordingLogSink();
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<IngestResponse> observer = new RecordingStreamObserver<>();
+        List<LogMessage> logs = List.of(
+                LogMessageFixtures.validLog(),
+                LogMessageFixtures.validLog().toBuilder().setService("worker").build());
+        var requestObserver = service.ingestLog(observer);
+
+        logs.forEach(requestObserver::onNext);
+        requestObserver.onError(new IllegalStateException("client stream interrupted"));
+
+        assertNull(observer.getError());
+        assertEquals(0, observer.getValues().size());
+        assertEquals(0, observer.getCompletionCount());
+        assertEquals(logs, sink.getAcceptedLogs());
+        assertEquals(List.of(logs.size()), sink.getBatchSizes());
+    }
+
+    @Test
     void invalidStreamingLogFlushesEarlierLogsAndTerminatesWithInvalidArgument() {
         RecordingLogSink sink = new RecordingLogSink();
         LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
