@@ -76,8 +76,12 @@ class LogIngestionGrpcIntegrationTest {
         boolean serverTerminated = true;
         try {
             if (channel != null) {
-                channel.shutdownNow();
+                channel.shutdown();
                 channelTerminated = channel.awaitTermination(RPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (!channelTerminated) {
+                    channel.shutdownNow();
+                    channelTerminated = channel.awaitTermination(RPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                }
             }
             if (server != null) {
                 server.shutdown();
