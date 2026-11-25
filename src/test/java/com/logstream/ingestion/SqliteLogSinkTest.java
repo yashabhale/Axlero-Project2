@@ -73,6 +73,23 @@ class SqliteLogSinkTest {
     }
 
     @Test
+    void reopenedSinkReadsPreviouslyPersistedLogs() throws Exception {
+        Path databasePath = tempDirectory.resolve("reopened.db");
+        long timestamp = 1_730_000_000_000L;
+        try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {
+            sink.accept(logAt("api", "survives reopening", timestamp));
+        }
+
+        try (SqliteLogSink reopenedSink = new SqliteLogSink(databasePath)) {
+            List<TimeSeriesBucket> buckets = reopenedSink.countLogsByMinute(timestamp, timestamp + 60_000);
+
+            assertEquals(1, buckets.size());
+            assertEquals(timestamp / 60_000 * 60_000, buckets.get(0).minuteStartMs());
+            assertEquals(1, buckets.get(0).count());
+        }
+    }
+
+    @Test
     void emptyBatchDoesNotPersistRecordsOrPreventLaterWrites() throws Exception {
         Path databasePath = tempDirectory.resolve("empty-batch.db");
         try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {
