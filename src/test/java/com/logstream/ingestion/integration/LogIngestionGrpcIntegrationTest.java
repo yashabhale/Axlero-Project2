@@ -182,6 +182,41 @@ class LogIngestionGrpcIntegrationTest {
     }
 
     @Test
+    void emptyClientStreamReturnsZeroAcceptedAndPersistsNothing() throws InterruptedException, SQLException {
+        AtomicReference<IngestResponse> response = new AtomicReference<>();
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        AtomicInteger completionCount = new AtomicInteger();
+        CountDownLatch responseTerminated = new CountDownLatch(1);
+        StreamObserver<IngestResponse> responseObserver = new StreamObserver<>() {
+            @Override
+            public void onNext(IngestResponse value) {
+                response.set(value);
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                error.set(throwable);
+                responseTerminated.countDown();
+            }
+
+            @Override
+            public void onCompleted() {
+                completionCount.incrementAndGet();
+                responseTerminated.countDown();
+            }
+        };
+        StreamObserver<LogMessage> requestObserver = asyncStub.ingestLog(responseObserver);
+        requestObserver.onCompleted();
+
+        assertTrue(responseTerminated.await(RPC_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+        assertNull(error.get());
+        assertNotNull(response.get());
+        assertEquals(0, response.get().getAcceptedCount());
+        assertEquals(1, completionCount.get());
+        assertEquals(0, readPersistedLogCount());
+    }
+
+    @Test
     void invalidClientStreamingLogReturnsInvalidArgumentAndPersistsOnlyEarlierValidLogs()
             throws InterruptedException, SQLException {
         LogMessage validLog = LogMessageFixtures.validLog().toBuilder()
