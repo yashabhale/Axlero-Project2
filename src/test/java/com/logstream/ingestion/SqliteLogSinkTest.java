@@ -141,6 +141,29 @@ class SqliteLogSinkTest {
     }
 
     @Test
+    void rollbackPreservesPreviouslyCommittedLogs() throws Exception {
+        Path databasePath = tempDirectory.resolve("preserve-committed.db");
+        try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {
+            sink.accept(log("api", "already committed"));
+            LogMessage validLog = log("worker", "should roll back");
+            LogMessage invalidLog = log(" ", "invalid");
+
+            assertThrows(IllegalStateException.class,
+                    () -> sink.acceptAll(List.of(validLog, invalidLog)));
+        }
+
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
+             var statement = connection.createStatement();
+             ResultSet logs = statement.executeQuery(
+                     "SELECT service, message FROM log_events ORDER BY id")) {
+            assertTrue(logs.next());
+            assertEquals("api", logs.getString("service"));
+            assertEquals("already committed", logs.getString("message"));
+            assertFalse(logs.next());
+        }
+    }
+
+    @Test
     void aggregatesLogCountsIntoMinuteBucketsWithinRequestedRange() throws Exception {
         Path databasePath = tempDirectory.resolve("logs.db");
         long start = 1_730_000_000_000L;
