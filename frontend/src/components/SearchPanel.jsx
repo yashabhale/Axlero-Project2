@@ -1,18 +1,22 @@
-import { useState } from 'react'
 import { Clock3, Database, Play, RotateCcw, Search, Sparkles } from 'lucide-react'
 
 const suggestions = [
   { label: 'Errors', query: 'level:ERROR' },
   { label: 'Billing API', query: 'service:billing-api' },
-  { label: 'Slow requests', query: 'response_time:>1000' },
+  { label: 'Auth service', query: 'service:auth-service' },
 ]
 
-export default function SearchPanel({ query, onQueryChange, onSearch }) {
-  const [range, setRange] = useState('Last 1 hour')
-
+export default function SearchPanel({
+  query,
+  onQueryChange,
+  onSearch,
+  rangeHours,
+  onRangeChange,
+  validationError,
+}) {
   function handleSubmit(event) {
     event.preventDefault()
-    onSearch()
+    onSearch(query)
   }
 
   return (
@@ -21,21 +25,24 @@ export default function SearchPanel({ query, onQueryChange, onSearch }) {
         <div>
           <div className="eyebrow"><span className="eyebrow-line" /> LOG ANALYTICS</div>
           <h1>Find the signal<span>.</span></h1>
-          <p>Search, filter, and explore logs from across your stack.</p>
+          <p>Search and explore logs returned by the backend.</p>
         </div>
         <button className="saved-query-button" type="button">
           <Database size={15} />
-          <span>Saved queries</span>
-          <span className="saved-query-number">4</span>
+          <span>Saved queries (demo)</span>
         </button>
       </div>
 
       <form className="query-card" onSubmit={handleSubmit}>
         <div className="query-toolbar">
-          <div className="query-mode"><Search size={14} /><span>Query</span><span className="query-mode-divider" /><span className="query-language">LQL</span></div>
-          <button className="time-range-button" type="button" onClick={() => setRange((current) => current === 'Last 1 hour' ? 'Last 24 hours' : 'Last 1 hour')}>
+          <div className="query-mode"><Search size={14} /><span>Query</span><span className="query-mode-divider" /><span className="query-language">FILTERS</span></div>
+          <button
+            className="time-range-button"
+            type="button"
+            onClick={() => onRangeChange(rangeHours === 1 ? 24 : 1)}
+          >
             <Clock3 size={14} />
-            <span>{range}</span>
+            <span>Last {rangeHours} {rangeHours === 1 ? 'hour' : 'hours'}</span>
             <span className="time-range-chevron">⌄</span>
           </button>
         </div>
@@ -62,7 +69,7 @@ export default function SearchPanel({ query, onQueryChange, onSearch }) {
                 key={suggestion.label}
                 onClick={() => {
                   onQueryChange(suggestion.query)
-                  onSearch()
+                  onSearch(suggestion.query)
                 }}
                 type="button"
               >
@@ -71,17 +78,18 @@ export default function SearchPanel({ query, onQueryChange, onSearch }) {
               </button>
             ))}
           </div>
-          <button className="clear-query" type="button" onClick={() => { onQueryChange(''); onSearch() }}>
+          <button className="clear-query" type="button" onClick={() => { onQueryChange(''); onSearch('') }}>
             <RotateCcw size={12} /> Clear
           </button>
         </div>
       </form>
+      {validationError && <p className="query-validation-error" role="alert">{validationError}</p>}
 
       <div className="query-hint">
         <span className="hint-indicator" />
         <span>Press <kbd>⌘ K</kbd> to focus search</span>
         <span className="hint-separator">·</span>
-        <span>Supports field filters, boolean operators, and full-text search</span>
+        <span>Supports level and service filters joined with AND</span>
         <button type="button" aria-label="Query help">Learn query syntax <span aria-hidden="true">↗</span></button>
       </div>
     </section>

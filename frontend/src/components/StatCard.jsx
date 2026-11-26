@@ -12,10 +12,12 @@ export default function StatCard({ label, value, detail, trend, tone, icon: Icon
           <div className="stat-value">{value}</div>
           <div className="stat-detail">{detail}</div>
         </div>
-        <span className={`stat-trend ${trend.startsWith('-') ? 'trend-down' : 'trend-up'}`}>
-          {trend.startsWith('-') ? <ArrowDownRight size={13} /> : <ArrowUpRight size={13} />}
-          {trend.replace(/^[+-]/, '')}
-        </span>
+        {trend && (
+          <span className={`stat-trend ${trend.startsWith('-') ? 'trend-down' : 'trend-up'}`}>
+            {trend.startsWith('-') ? <ArrowDownRight size={13} /> : <ArrowUpRight size={13} />}
+            {trend.replace(/^[+-]/, '')}
+          </span>
+        )}
       </div>
     </article>
   )

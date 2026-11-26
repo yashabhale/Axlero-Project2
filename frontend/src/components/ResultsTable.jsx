@@ -153,8 +153,8 @@ function LogVolumeChart({ logs }) {
     <section className="log-volume-card" aria-label="Log volume histogram">
       <div className="log-volume-heading">
         <div>
-          <h2>Log volume over time</h2>
-          <span>{totalInRange.toLocaleString()} loaded events in the last {rangeMinutes} minutes</span>
+          <h2>Visible page volume</h2>
+          <span>{totalInRange.toLocaleString()} records on this page in the last {rangeMinutes} minutes</span>
         </div>
         <div className="log-volume-ranges" role="group" aria-label="Histogram time range">
           {[15, 60, 360].map((minutes) => (
@@ -171,7 +171,7 @@ function LogVolumeChart({ logs }) {
         </div>
       </div>
       <Suspense fallback={<div className="log-volume-chart-loading" aria-label="Loading histogram" />}>
-        <div role="img" aria-label={`Histogram of ${totalInRange} loaded log events over the last ${rangeMinutes} minutes`}>
+        <div role="img" aria-label={`Histogram of ${totalInRange} visible page records over the last ${rangeMinutes} minutes`}>
           <ReactECharts option={option} notMerge lazyUpdate style={{ height: 190, width: '100%' }} />
         </div>
       </Suspense>
@@ -179,8 +179,18 @@ function LogVolumeChart({ logs }) {
   )
 }
 
-export default function ResultsTable({ logs, totalLogs, onLoadMore }) {
+export default function ResultsTable({
+  logs,
+  totalLogs,
+  page,
+  pageSize,
+  loading,
+  error,
+  onRetry,
+  onPageChange,
+}) {
   const [expandedId, setExpandedId] = useState(null)
+  const pageCount = Math.max(1, Math.ceil(totalLogs / pageSize))
 
   function exportLogs() {
     const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' })
@@ -198,11 +208,13 @@ export default function ResultsTable({ logs, totalLogs, onLoadMore }) {
       <div className="results-heading">
         <div className="results-title-group">
           <h2>Log events</h2>
-          <span className="results-count">{logs.length.toLocaleString()} <span>of</span> {totalLogs.toLocaleString()}</span>
-          <span className="results-live"><span /> LIVE</span>
+          <span className="results-count">
+            {loading ? 'Loading' : `${logs.length.toLocaleString()} of ${totalLogs.toLocaleString()}`}
+          </span>
+          <span className="results-source">BACKEND</span>
         </div>
         <div className="results-actions">
-          <span className="results-refresh">Updated just now</span>
+          <span className="results-refresh">Backend query results</span>
           <button className="table-tool-button" type="button"><ListFilter size={14} /><span>Columns</span><ChevronDown size={12} /></button>
           <button className="table-tool-button export-button" type="button" onClick={exportLogs}><Download size={14} /><span>Export</span></button>
         </div>
@@ -213,7 +225,7 @@ export default function ResultsTable({ logs, totalLogs, onLoadMore }) {
           <thead>
             <tr>
               <th className="expand-cell"><span className="sr-only">Expand</span></th>
-              <th className="timestamp-heading">TIMESTAMP <span>↓</span></th>
+              <th className="timestamp-heading">TIMESTAMP <span>↑</span></th>
               <th>LEVEL</th>
               <th>SERVICE</th>
               <th>MESSAGE</th>
@@ -221,7 +233,32 @@ export default function ResultsTable({ logs, totalLogs, onLoadMore }) {
             </tr>
           </thead>
           <tbody>
-            {logs.map((log) => (
+            {loading ? (
+              <tr>
+                <td colSpan="6" className="empty-state" role="status">
+                  <div className="empty-icon"><ListFilter size={20} /></div>
+                  <strong>Loading backend logs…</strong>
+                  <span>Fetching the requested page.</span>
+                </td>
+              </tr>
+            ) : error ? (
+              <tr>
+                <td colSpan="6" className="empty-state" role="alert">
+                  <div className="empty-icon"><ListFilter size={20} /></div>
+                  <strong>Unable to load logs</strong>
+                  <span>{error}</span>
+                  <button className="load-more-button retry-button" type="button" onClick={onRetry}>Retry</button>
+                </td>
+              </tr>
+            ) : logs.length === 0 ? (
+              <tr>
+                <td colSpan="6" className="empty-state" role="status">
+                  <div className="empty-icon"><ListFilter size={20} /></div>
+                  <strong>No logs match this query</strong>
+                  <span>Try changing the filters or time range.</span>
+                </td>
+              </tr>
+            ) : logs.map((log) => (
               <LogRow
                 key={log.id}
                 log={log}
@@ -229,29 +266,39 @@ export default function ResultsTable({ logs, totalLogs, onLoadMore }) {
                 onToggle={() => setExpandedId((current) => current === log.id ? null : log.id)}
               />
             ))}
-            {logs.length === 0 && (
-              <tr>
-                <td colSpan="6" className="empty-state">
-                  <div className="empty-icon"><ListFilter size={20} /></div>
-                  <strong>No logs match this query</strong>
-                  <span>Try adjusting your search or clearing the active filters.</span>
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
 
-      {logs.length > 0 && (
+      {!loading && !error && totalLogs > 0 && (
         <div className="table-footer">
-          <span>Showing <strong>{logs.length}</strong> of <strong>{totalLogs.toLocaleString()}</strong> events</span>
+          <span>Showing <strong>{logs.length}</strong> on this page of <strong>{totalLogs.toLocaleString()}</strong> matches</span>
           <div className="pagination">
-            <button type="button" disabled aria-label="Previous page">‹</button>
-            <span className="page-current">1</span>
-            <button type="button" disabled aria-label="Next page">›</button>
-            <span className="page-size">Rows per page: <strong>50</strong><ChevronDown size={12} /></span>
+            <button
+              type="button"
+              disabled={page === 0}
+              aria-label="Previous page"
+              onClick={() => onPageChange(page - 1)}
+            >
+              ‹
+            </button>
+            <span className="page-current">{page + 1}</span>
+            <span>of {pageCount}</span>
+            <button
+              type="button"
+              disabled={page + 1 >= pageCount}
+              aria-label="Next page"
+              onClick={() => onPageChange(page + 1)}
+            >
+              ›
+            </button>
+            <span className="page-size">Rows per page: <strong>{pageSize}</strong></span>
           </div>
-          <button className="load-more-button" type="button" onClick={onLoadMore}>Load more events <span>↓</span></button>
+          {page + 1 < pageCount && (
+            <button className="load-more-button" type="button" onClick={() => onPageChange(page + 1)}>
+              Load next page <span>↓</span>
+            </button>
+          )}
         </div>
       )}
     </section>

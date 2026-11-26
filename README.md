@@ -136,7 +136,7 @@ mvn compile exec:java "-Dexec.mainClass=com.logstream.ingestion.LogIngestionServ
 
 ## Run the frontend dashboard
 
-The dashboard runs independently of the Java backend and currently uses mock data for local exploration.
+The dashboard fetches records from the backend `GET /api/logs` endpoint. Start the backend first, then run the frontend:
 
 From the repository root:
 
@@ -146,11 +146,14 @@ npm install
 npm run dev
 ```
 
-Then open:
+Then open http://localhost:5173. Vite proxies `/api` to `http://localhost:8080` by default. Set `LOGSTREAM_HTTP_PROXY_TARGET` before starting Vite to use a different backend HTTP origin:
 
-- http://localhost:5173
+```powershell
+$env:LOGSTREAM_HTTP_PROXY_TARGET = "http://localhost:8081"
+npm run dev
+```
 
-The dashboard supports local filtering examples such as `level:ERROR AND service:billing-api`.
+For deployments that should call the API directly, set `VITE_API_BASE_URL` to the backend origin when building the frontend; cross-origin deployments must also be allowed by `LOGSTREAM_CORS_ORIGINS`. The search supports `level` and exact `service` filters, with `AND` between them. The 1-hour/24-hour range and pagination are sent to the backend. The histogram describes only the currently loaded page; aggregate metrics not supplied by the API are marked unavailable. `frontend/src/data/mockLogs.js` remains available for demo use but is not used as a silent API fallback.
 
 ## Repository structure
 
@@ -166,8 +169,8 @@ The dashboard supports local filtering examples such as `level:ERROR AND service
 └── out/                 # Additional generated or runtime output
 ```
 
-## Notes..
+## Notes
 
 - The backend is built for streaming and batch ingestion use cases.
-- The frontend currently does not yet connect to the gRPC ingestion service or persisted database.
+- The frontend reads persisted logs through the HTTP query API and does not connect directly to gRPC.
 - Protobuf and Java gRPC classes are generated automatically during the Maven build lifecycle.

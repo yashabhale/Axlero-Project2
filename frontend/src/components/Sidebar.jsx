@@ -14,8 +14,8 @@ import {
 const primaryNavigation = [
   { label: 'Overview', icon: Layers3 },
   { label: 'Log explorer', icon: Search, active: true },
-  { label: 'Live tail', icon: Activity, badge: 'LIVE' },
-  { label: 'Alerts', icon: Bell, count: '3' },
+  { label: 'Live tail', icon: Activity, badge: 'DEMO' },
+  { label: 'Alerts', icon: Bell },
 ]
 
 const workspaceNavigation = [
@@ -70,7 +70,7 @@ export default function Sidebar() {
 
       <div className="sidebar-bottom">
         <div className="usage-card">
-          <div className="usage-heading"><span>Monthly ingestion</span><span>68%</span></div>
+          <div className="usage-heading"><span>Monthly ingestion (demo)</span><span>68%</span></div>
           <div className="usage-track"><span /></div>
           <div className="usage-caption">2.04 TB <span>of 3 TB</span></div>
           <button type="button">View usage <span aria-hidden="true">→</span></button>
@@ -88,8 +88,8 @@ export default function Sidebar() {
           <Settings2 aria-hidden="true" size={16} />
         </button>
       </div>
-      <span className="sidebar-version"><ShieldCheck size={12} /> All systems operational</span>
-      <span className="sidebar-clock"><Clock3 size={12} /> Data retention: 30 days</span>
+      <span className="sidebar-version"><ShieldCheck size={12} /> Demo status — not monitored</span>
+      <span className="sidebar-clock"><Clock3 size={12} /> Demo retention: 30 days</span>
     </aside>
   )
 }
