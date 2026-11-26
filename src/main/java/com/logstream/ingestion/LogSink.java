@@ -9,6 +9,8 @@ public interface LogSink extends AutoCloseable {
 
     List<LogMessage> queryLogs(LogQuery query);
 
+    long countLogs(LogQuery query);
+
     List<TimeSeriesBucket> countLogsByMinute(long startTimestampMs, long endTimestampMs);
 
     default void acceptAll(List<LogMessage> logMessages) {

@@ -23,6 +23,8 @@ class InMemoryLogSinkTest {
                 new LogQuery(LogLevel.ERROR, "api", 200L, 301L, 10, 0));
         assertEquals(List.of("middle", "same time second"),
                 filtered.stream().map(LogMessage::getMessage).toList());
+        assertEquals(2, sink.countLogs(new LogQuery(
+                LogLevel.ERROR, "api", 200L, 301L, 10, 0)));
 
         List<LogMessage> page = sink.queryLogs(new LogQuery(null, null, null, null, 2, 2));
         assertEquals(List.of("middle", "same time second"),

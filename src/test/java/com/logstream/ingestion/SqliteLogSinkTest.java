@@ -145,6 +145,7 @@ class SqliteLogSinkTest {
             List<LogMessage> filtered = sink.queryLogs(filters);
             assertEquals(List.of("first", "second"),
                     filtered.stream().map(LogMessage::getMessage).toList());
+            assertEquals(2, sink.countLogs(filters));
 
             List<LogMessage> page = sink.queryLogs(new LogQuery(
                     filters.level(), filters.service(), filters.startTimestampMs(),

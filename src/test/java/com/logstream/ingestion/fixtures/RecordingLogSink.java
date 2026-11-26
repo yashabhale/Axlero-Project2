@@ -49,6 +49,12 @@ public final class RecordingLogSink implements LogSink {
     }
 
     @Override
+    public synchronized long countLogs(LogQuery query) {
+        Objects.requireNonNull(query, "query");
+        return acceptedLogs.stream().filter(query::matches).count();
+    }
+
+    @Override
     public synchronized List<TimeSeriesBucket> countLogsByMinute(
             long startTimestampMs,
             long endTimestampMs) {

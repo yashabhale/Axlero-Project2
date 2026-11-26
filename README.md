@@ -33,17 +33,77 @@ The Java sources are generated from `src/main/proto/log_ingestion.proto` during 
 
 ### 1) Start the backend
 
-Run the service on the default gRPC port (`50051`):
+Run both backend servers with the default ports: gRPC on `50051` and HTTP on `8080`.
 
 ```powershell
 mvn compile exec:java "-Dexec.mainClass=com.logstream.ingestion.LogIngestionServer"
 ```
 
-To run it on a custom port, pass the port as the first application argument:
+To run gRPC on a custom port, pass the port as the first application argument:
 
 ```powershell
 mvn compile exec:java "-Dexec.mainClass=com.logstream.ingestion.LogIngestionServer" "-Dexec.args=50052"
 ```
+
+Configure the HTTP API port with `LOGSTREAM_HTTP_PORT`:
+
+```powershell
+$env:LOGSTREAM_HTTP_PORT = "8081"
+mvn compile exec:java "-Dexec.mainClass=com.logstream.ingestion.LogIngestionServer"
+```
+
+The HTTP server and gRPC server use separate ports and share the same SQLite database. Set `LOGSTREAM_DB_PATH` to change the database location. HTTP shutdown allows in-flight requests up to five seconds to finish before stopping its request workers; the gRPC server is also shut down gracefully.
+
+## HTTP log query API
+
+The browser-accessible API is served by the same `LogIngestionServer` process:
+
+```text
+GET http://localhost:8080/api/logs
+```
+
+Supported query parameters:
+
+| Parameter | Optional | Description |
+| --- | --- | --- |
+| `level` | Yes | Log level: `INFO`, `WARN`, `ERROR`, or `DEBUG`. |
+| `service` | Yes | Exact service name. |
+| `startTime` | Yes | Inclusive Unix timestamp in milliseconds. |
+| `endTime` | Yes | Exclusive Unix timestamp in milliseconds. |
+| `limit` | Yes | Page size; defaults to `100`, maximum `1000`. |
+| `offset` | Yes | Number of matching records to skip; defaults to `0`. |
+
+Example request:
+
+```powershell
+curl.exe "http://localhost:8080/api/logs?level=ERROR&service=billing-api&limit=50&offset=0"
+```
+
+Successful responses are JSON, ordered chronologically (with insertion order used to break timestamp ties). `totalCount` is the count of all records matching the filters, before pagination:
+
+```json
+{
+  "logs": [
+    {
+      "timestamp": 1730000000000,
+      "level": "ERROR",
+      "service": "billing-api",
+      "message": "Payment provider request failed",
+      "responseTimeMs": 2481,
+      "tags": {
+        "environment": "production"
+      }
+    }
+  ],
+  "limit": 50,
+  "offset": 0,
+  "totalCount": 1
+}
+```
+
+Invalid query parameters return HTTP `400` with a JSON `error` message. Unexpected server errors return HTTP `500` with a generic message; details are logged server-side. The default CORS allowlist supports Vite at `http://localhost:5173` and `http://127.0.0.1:5173`. Set `LOGSTREAM_CORS_ORIGINS` to a comma-separated list of exact allowed origins for other browser deployments; setting it to an empty value disables cross-origin access.
+
+The API does not provide authentication. CORS is a browser policy, not access control; keep the service on a trusted network or behind an authenticated reverse proxy before exposing it beyond local development.
 
 ### 2) Run the local ingestion test
 

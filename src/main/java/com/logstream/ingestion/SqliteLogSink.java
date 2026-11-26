@@ -102,42 +102,22 @@ public final class SqliteLogSink implements LogSink {
     @Override
     public synchronized List<LogMessage> queryLogs(LogQuery query) {
         Objects.requireNonNull(query, "query");
+        QueryFilters filters = queryFilters(query);
         StringBuilder sql = new StringBuilder(
                 "SELECT page.id, page.timestamp_ms, page.level, page.service, page.message, "
                         + "page.response_time_ms, tags.tag_key, tags.tag_value "
                         + "FROM (SELECT id, timestamp_ms, level, service, message, response_time_ms "
-                        + "FROM log_events");
-        List<Object> parameters = new ArrayList<>();
-        List<String> conditions = new ArrayList<>();
-        if (query.level() != null) {
-            conditions.add("level = ?");
-            parameters.add(query.level().name());
-        }
-        if (query.service() != null) {
-            conditions.add("service = ?");
-            parameters.add(query.service());
-        }
-        if (query.startTimestampMs() != null) {
-            conditions.add("timestamp_ms >= ?");
-            parameters.add(query.startTimestampMs());
-        }
-        if (query.endTimestampMs() != null) {
-            conditions.add("timestamp_ms < ?");
-            parameters.add(query.endTimestampMs());
-        }
-        if (!conditions.isEmpty()) {
-            sql.append(" WHERE ").append(String.join(" AND ", conditions));
-        }
-        sql.append(" ORDER BY timestamp_ms ASC, id ASC LIMIT ? OFFSET ?) AS page ")
+                        + "FROM log_events")
+                .append(filters.whereClause())
+                .append(" ORDER BY timestamp_ms ASC, id ASC LIMIT ? OFFSET ?) AS page ")
                 .append("LEFT JOIN log_tags AS tags ON tags.log_id = page.id ")
                 .append("ORDER BY page.timestamp_ms ASC, page.id ASC, tags.tag_key ASC");
+        List<Object> parameters = new ArrayList<>(filters.parameters());
         parameters.add(query.limit());
         parameters.add(query.offset());
 
         try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
-            for (int index = 0; index < parameters.size(); index++) {
-                statement.setObject(index + 1, parameters.get(index));
-            }
+            bindParameters(statement, parameters);
             try (ResultSet results = statement.executeQuery()) {
                 List<LogMessage> logs = new ArrayList<>();
                 LogMessage.Builder currentLog = null;
@@ -168,6 +148,24 @@ public final class SqliteLogSink implements LogSink {
             }
         } catch (SQLException exception) {
             throw new IllegalStateException("Failed to query logs", exception);
+        }
+    }
+
+    @Override
+    public synchronized long countLogs(LogQuery query) {
+        Objects.requireNonNull(query, "query");
+        QueryFilters filters = queryFilters(query);
+        String sql = "SELECT COUNT(*) FROM log_events" + filters.whereClause();
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            bindParameters(statement, filters.parameters());
+            try (ResultSet results = statement.executeQuery()) {
+                if (!results.next()) {
+                    throw new SQLException("SQLite did not return the log count");
+                }
+                return results.getLong(1);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to count logs", exception);
         }
     }
 
@@ -225,5 +223,40 @@ public final class SqliteLogSink implements LogSink {
                 }
             }
         }
+    }
+
+    private static QueryFilters queryFilters(LogQuery query) {
+        List<String> conditions = new ArrayList<>();
+        List<Object> parameters = new ArrayList<>();
+        if (query.level() != null) {
+            conditions.add("level = ?");
+            parameters.add(query.level().name());
+        }
+        if (query.service() != null) {
+            conditions.add("service = ?");
+            parameters.add(query.service());
+        }
+        if (query.startTimestampMs() != null) {
+            conditions.add("timestamp_ms >= ?");
+            parameters.add(query.startTimestampMs());
+        }
+        if (query.endTimestampMs() != null) {
+            conditions.add("timestamp_ms < ?");
+            parameters.add(query.endTimestampMs());
+        }
+        String whereClause = conditions.isEmpty()
+                ? ""
+                : " WHERE " + String.join(" AND ", conditions);
+        return new QueryFilters(whereClause, List.copyOf(parameters));
+    }
+
+    private static void bindParameters(PreparedStatement statement, List<Object> parameters)
+            throws SQLException {
+        for (int index = 0; index < parameters.size(); index++) {
+            statement.setObject(index + 1, parameters.get(index));
+        }
+    }
+
+    private record QueryFilters(String whereClause, List<Object> parameters) {
     }
 }

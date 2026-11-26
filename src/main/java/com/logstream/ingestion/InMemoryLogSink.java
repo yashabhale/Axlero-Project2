@@ -36,6 +36,12 @@ public final class InMemoryLogSink implements LogSink {
     }
 
     @Override
+    public synchronized long countLogs(LogQuery query) {
+        Objects.requireNonNull(query, "query");
+        return logs.stream().filter(query::matches).count();
+    }
+
+    @Override
     public synchronized List<TimeSeriesBucket> countLogsByMinute(long startTimestampMs, long endTimestampMs) {
         Map<Long, Long> countsByMinute = new TreeMap<>();
         logCountsByTimestamp.subMap(startTimestampMs, true, endTimestampMs, false)
