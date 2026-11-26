@@ -1,5 +1,6 @@
 package com.logstream.ingestion;
 
+import com.logstream.ingestion.v1.LogLevel;
 import com.logstream.ingestion.v1.LogMessage;
 
 import java.io.IOException;
@@ -95,6 +96,78 @@ public final class SqliteLogSink implements LogSink {
                 exception.addSuppressed(rollbackException);
             }
             throw new IllegalStateException("Failed to persist log batch", exception);
+        }
+    }
+
+    @Override
+    public synchronized List<LogMessage> queryLogs(LogQuery query) {
+        Objects.requireNonNull(query, "query");
+        StringBuilder sql = new StringBuilder(
+                "SELECT page.id, page.timestamp_ms, page.level, page.service, page.message, "
+                        + "page.response_time_ms, tags.tag_key, tags.tag_value "
+                        + "FROM (SELECT id, timestamp_ms, level, service, message, response_time_ms "
+                        + "FROM log_events");
+        List<Object> parameters = new ArrayList<>();
+        List<String> conditions = new ArrayList<>();
+        if (query.level() != null) {
+            conditions.add("level = ?");
+            parameters.add(query.level().name());
+        }
+        if (query.service() != null) {
+            conditions.add("service = ?");
+            parameters.add(query.service());
+        }
+        if (query.startTimestampMs() != null) {
+            conditions.add("timestamp_ms >= ?");
+            parameters.add(query.startTimestampMs());
+        }
+        if (query.endTimestampMs() != null) {
+            conditions.add("timestamp_ms < ?");
+            parameters.add(query.endTimestampMs());
+        }
+        if (!conditions.isEmpty()) {
+            sql.append(" WHERE ").append(String.join(" AND ", conditions));
+        }
+        sql.append(" ORDER BY timestamp_ms ASC, id ASC LIMIT ? OFFSET ?) AS page ")
+                .append("LEFT JOIN log_tags AS tags ON tags.log_id = page.id ")
+                .append("ORDER BY page.timestamp_ms ASC, page.id ASC, tags.tag_key ASC");
+        parameters.add(query.limit());
+        parameters.add(query.offset());
+
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            for (int index = 0; index < parameters.size(); index++) {
+                statement.setObject(index + 1, parameters.get(index));
+            }
+            try (ResultSet results = statement.executeQuery()) {
+                List<LogMessage> logs = new ArrayList<>();
+                LogMessage.Builder currentLog = null;
+                long currentId = -1;
+                while (results.next()) {
+                    long logId = results.getLong("id");
+                    if (currentLog == null || logId != currentId) {
+                        if (currentLog != null) {
+                            logs.add(currentLog.build());
+                        }
+                        currentId = logId;
+                        currentLog = LogMessage.newBuilder()
+                                .setTimestamp(results.getLong("timestamp_ms"))
+                                .setLevel(LogLevel.valueOf(results.getString("level")))
+                                .setService(results.getString("service"))
+                                .setMessage(results.getString("message"))
+                                .setResponseTime(results.getInt("response_time_ms"));
+                    }
+                    String tagKey = results.getString("tag_key");
+                    if (tagKey != null) {
+                        currentLog.putTags(tagKey, results.getString("tag_value"));
+                    }
+                }
+                if (currentLog != null) {
+                    logs.add(currentLog.build());
+                }
+                return List.copyOf(logs);
+            }
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Failed to query logs", exception);
         }
     }
 

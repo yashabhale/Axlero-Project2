@@ -3,20 +3,36 @@ package com.logstream.ingestion;
 import com.logstream.ingestion.v1.LogMessage;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.LongAdder;
 
 public final class InMemoryLogSink implements LogSink {
     private final LongAdder acceptedCount = new LongAdder();
     private final NavigableMap<Long, Long> logCountsByTimestamp = new TreeMap<>();
+    private final List<LogMessage> logs = new ArrayList<>();
 
     @Override
     public synchronized void accept(LogMessage logMessage) {
+        LogMessage acceptedLog = Objects.requireNonNull(logMessage, "logMessage");
         acceptedCount.increment();
-        logCountsByTimestamp.merge(logMessage.getTimestamp(), 1L, Long::sum);
+        logs.add(acceptedLog);
+        logCountsByTimestamp.merge(acceptedLog.getTimestamp(), 1L, Long::sum);
+    }
+
+    @Override
+    public synchronized List<LogMessage> queryLogs(LogQuery query) {
+        Objects.requireNonNull(query, "query");
+        return logs.stream()
+                .filter(query::matches)
+                .sorted(Comparator.comparingLong(LogMessage::getTimestamp))
+                .skip(query.offset())
+                .limit(query.limit())
+                .toList();
     }
 
     @Override

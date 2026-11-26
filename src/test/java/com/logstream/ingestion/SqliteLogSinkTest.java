@@ -103,6 +103,62 @@ class SqliteLogSinkTest {
     }
 
     @Test
+    void queriesPersistedLogsInChronologicalOrderAndRestoresTags() throws Exception {
+        Path databasePath = tempDirectory.resolve("query-order.db");
+        long timestamp = 1_730_000_000_000L;
+        try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {
+            sink.accept(logAt("api", "later", timestamp + 200));
+            sink.accept(logAt("api", "earlier", timestamp).toBuilder()
+                    .putTags("environment", "test")
+                    .build());
+            sink.accept(logAt("api", "same timestamp", timestamp));
+        }
+
+        try (SqliteLogSink reopenedSink = new SqliteLogSink(databasePath)) {
+            List<LogMessage> logs = reopenedSink.queryLogs(
+                    new LogQuery(null, null, null, null, 10, 0));
+
+            assertEquals(List.of("earlier", "same timestamp", "later"),
+                    logs.stream().map(LogMessage::getMessage).toList());
+            assertEquals("test", logs.get(0).getTagsMap().get("environment"));
+        }
+    }
+
+    @Test
+    void queriesApplyFiltersPaginationAndReturnEmptyResults() throws Exception {
+        long timestamp = 1_730_000_000_000L;
+        try (SqliteLogSink sink = new SqliteLogSink(tempDirectory.resolve("query-filters.db"))) {
+            sink.accept(logAt("api", "before range", timestamp - 1).toBuilder()
+                    .setLevel(LogLevel.ERROR)
+                    .build());
+            sink.accept(logAt("api", "first", timestamp).toBuilder().setLevel(LogLevel.ERROR).build());
+            sink.accept(logAt("api", "wrong level", timestamp + 1));
+            sink.accept(logAt("worker", "other service", timestamp + 1).toBuilder()
+                    .setLevel(LogLevel.ERROR)
+                    .build());
+            sink.accept(logAt("api", "second", timestamp + 2).toBuilder().setLevel(LogLevel.ERROR).build());
+            sink.accept(logAt("api", "at range end", timestamp + 3).toBuilder()
+                    .setLevel(LogLevel.ERROR)
+                    .build());
+
+            LogQuery filters = new LogQuery(LogLevel.ERROR, "api", timestamp, timestamp + 3, 10, 0);
+            List<LogMessage> filtered = sink.queryLogs(filters);
+            assertEquals(List.of("first", "second"),
+                    filtered.stream().map(LogMessage::getMessage).toList());
+
+            List<LogMessage> page = sink.queryLogs(new LogQuery(
+                    filters.level(), filters.service(), filters.startTimestampMs(),
+                    filters.endTimestampMs(), 1, 1));
+            assertEquals(List.of("second"), page.stream().map(LogMessage::getMessage).toList());
+
+            assertTrue(sink.queryLogs(new LogQuery(
+                    LogLevel.WARN, "api", timestamp, timestamp + 3, 10, 0)).isEmpty());
+            assertTrue(sink.queryLogs(new LogQuery(
+                    null, "api' OR 1=1 --", null, null, 10, 0)).isEmpty());
+        }
+    }
+
+    @Test
     void emptyBatchDoesNotPersistRecordsOrPreventLaterWrites() throws Exception {
         Path databasePath = tempDirectory.resolve("empty-batch.db");
         try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {

@@ -7,6 +7,8 @@ import java.util.List;
 public interface LogSink extends AutoCloseable {
     void accept(LogMessage logMessage);
 
+    List<LogMessage> queryLogs(LogQuery query);
+
     List<TimeSeriesBucket> countLogsByMinute(long startTimestampMs, long endTimestampMs);
 
     default void acceptAll(List<LogMessage> logMessages) {

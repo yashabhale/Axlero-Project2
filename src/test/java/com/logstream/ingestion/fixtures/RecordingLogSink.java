@@ -1,10 +1,12 @@
 package com.logstream.ingestion.fixtures;
 
+import com.logstream.ingestion.LogQuery;
 import com.logstream.ingestion.LogSink;
 import com.logstream.ingestion.TimeSeriesBucket;
 import com.logstream.ingestion.v1.LogMessage;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -33,6 +35,17 @@ public final class RecordingLogSink implements LogSink {
         batches.add(batch);
         throwIfPersistenceFails();
         acceptedLogs.addAll(batch);
+    }
+
+    @Override
+    public synchronized List<LogMessage> queryLogs(LogQuery query) {
+        Objects.requireNonNull(query, "query");
+        return acceptedLogs.stream()
+                .filter(query::matches)
+                .sorted(Comparator.comparingLong(LogMessage::getTimestamp))
+                .skip(query.offset())
+                .limit(query.limit())
+                .toList();
     }
 
     @Override
