@@ -141,6 +141,47 @@ class LogIngestionServiceImplTest {
     }
 
     @Test
+    void aggregationUsesHalfOpenBoundariesAndFillsInteriorEmptyMinutes() {
+        RecordingLogSink sink = new RecordingLogSink();
+        long firstMinute = 1_730_000_000_000L / 60_000 * 60_000;
+        long start = firstMinute + 10_000;
+        long end = firstMinute + 180_000;
+        sink.acceptAll(List.of(
+                LogMessageFixtures.validLogAt(start - 1),
+                LogMessageFixtures.validLogAt(start),
+                LogMessageFixtures.validLogAt(firstMinute + 120_000)
+                        .toBuilder()
+                        .setService("worker")
+                        .setLevel(LogLevel.ERROR)
+                        .build(),
+                LogMessageFixtures.validLogAt(end)
+                        .toBuilder()
+                        .setService("scheduler")
+                        .setLevel(LogLevel.WARN)
+                        .build()));
+        LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
+        RecordingStreamObserver<LogCountResponse> observer = new RecordingStreamObserver<>();
+        LogCountRequest request = LogCountRequest.newBuilder()
+                .setStartTimestampMs(start)
+                .setEndTimestampMs(end)
+                .build();
+
+        service.getLogCountsByMinute(request, observer);
+
+        assertNull(observer.getError());
+        assertEquals(1, observer.getValues().size());
+        LogCountResponse response = observer.getValues().get(0);
+        assertEquals(3, response.getBucketsCount());
+        assertEquals(firstMinute, response.getBuckets(0).getMinuteStartMs());
+        assertEquals(1, response.getBuckets(0).getCount());
+        assertEquals(firstMinute + 60_000, response.getBuckets(1).getMinuteStartMs());
+        assertEquals(0, response.getBuckets(1).getCount());
+        assertEquals(firstMinute + 120_000, response.getBuckets(2).getMinuteStartMs());
+        assertEquals(1, response.getBuckets(2).getCount());
+        assertEquals(1, observer.getCompletionCount());
+    }
+
+    @Test
     void emptyAggregationReturnsZeroCountBucketsAndCompletesObserver() {
         RecordingLogSink sink = new RecordingLogSink();
         LogIngestionServiceImpl service = new LogIngestionServiceImpl(sink);
