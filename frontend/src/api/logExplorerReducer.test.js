@@ -41,6 +41,30 @@ test('filter and time-range changes reset pagination', () => {
   assert.equal(state.rangeHours, 24)
 })
 
+test('clears filters, time range, and pagination together', () => {
+  let state = {
+    ...createInitialLogExplorerState(),
+    filters: { level: 'ERROR', service: 'billing-api' },
+    rangeHours: 24,
+    page: 2,
+    logs: [{ id: 'previous' }],
+    totalCount: 101,
+    error: 'Previous error',
+  }
+
+  state = logExplorerReducer(state, { type: 'filters-cleared' })
+
+  assert.deepEqual(state.filters, {})
+  assert.equal(state.rangeHours, 1)
+  assert.equal(state.page, 0)
+  assert.deepEqual(state.logs, [])
+  assert.equal(state.totalCount, 0)
+  assert.equal(state.error, null)
+
+  const unchanged = logExplorerReducer(state, { type: 'filters-cleared' })
+  assert.strictEqual(unchanged, state)
+})
+
 test('paginates within the available result pages', () => {
   let state = { ...createInitialLogExplorerState(), totalCount: LOG_PAGE_SIZE * 2 + 1 }
   state = logExplorerReducer(state, { type: 'page-changed', page: 1 })
@@ -51,6 +75,19 @@ test('paginates within the available result pages', () => {
 
   state = logExplorerReducer(state, { type: 'page-changed', page: -1 })
   assert.equal(state.page, 0)
+})
+
+test('supports first and last page boundaries', () => {
+  let state = { ...createInitialLogExplorerState(), totalCount: LOG_PAGE_SIZE * 3 }
+
+  state = logExplorerReducer(state, { type: 'page-changed', page: 2 })
+  assert.equal(state.page, 2)
+
+  state = logExplorerReducer(state, { type: 'page-changed', page: 0 })
+  assert.equal(state.page, 0)
+
+  state = logExplorerReducer(state, { type: 'page-changed', page: 2 })
+  assert.equal(state.page, 2)
 })
 
 test('ignores stale requests after a newer request starts', () => {
@@ -73,6 +110,43 @@ test('ignores stale requests after a newer request starts', () => {
   assert.equal(staleState.logs[0].id, 'new')
 })
 
+test('moves to a valid page when the result count shrinks', () => {
+  const state = {
+    ...createInitialLogExplorerState(),
+    page: 3,
+    requestId: 4,
+  }
+
+  const adjusted = logExplorerReducer(state, {
+    type: 'request-succeeded',
+    requestId: 4,
+    result: { logs: [], totalCount: LOG_PAGE_SIZE + 1 },
+  })
+
+  assert.equal(adjusted.page, 1)
+  assert.equal(adjusted.totalCount, LOG_PAGE_SIZE + 1)
+  assert.equal(adjusted.loading, true)
+  assert.deepEqual(adjusted.logs, [])
+})
+
+test('does not change state for unchanged filters or time range', () => {
+  const state = {
+    ...createInitialLogExplorerState(),
+    filters: { level: 'ERROR', service: 'billing-api' },
+    page: 2,
+    totalCount: 101,
+  }
+
+  assert.strictEqual(logExplorerReducer(state, {
+    type: 'filters-changed',
+    filters: { level: 'ERROR', service: 'billing-api' },
+  }), state)
+  assert.strictEqual(logExplorerReducer(state, {
+    type: 'range-changed',
+    rangeHours: 1,
+  }), state)
+})
+
 test('stores request errors and clears prior results', () => {
   let state = {
     ...createInitialLogExplorerState(),
@@ -90,4 +164,21 @@ test('stores request errors and clears prior results', () => {
   assert.equal(state.error, 'Backend unavailable')
   assert.deepEqual(state.logs, [])
   assert.equal(state.totalCount, 0)
+})
+
+test('refresh clears the error and requests a new result set', () => {
+  const state = {
+    ...createInitialLogExplorerState(),
+    refreshToken: 2,
+    loading: false,
+    error: 'Backend unavailable',
+    logs: [{ id: 'previous' }],
+  }
+
+  const refreshed = logExplorerReducer(state, { type: 'refresh' })
+
+  assert.equal(refreshed.refreshToken, 3)
+  assert.equal(refreshed.loading, true)
+  assert.equal(refreshed.error, null)
+  assert.deepEqual(refreshed.logs, [])
 })

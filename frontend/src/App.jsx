@@ -29,6 +29,7 @@ export default function App() {
   const [queryError, setQueryError] = useState(null)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const requestSequence = useRef(0)
+  const searchInputRef = useRef(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -56,6 +57,18 @@ export default function App() {
     return () => controller.abort()
   }, [explorer.filters, explorer.page, explorer.rangeHours, explorer.refreshToken])
 
+  useEffect(() => {
+    function handleSearchShortcut(event) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+      }
+    }
+
+    window.addEventListener('keydown', handleSearchShortcut)
+    return () => window.removeEventListener('keydown', handleSearchShortcut)
+  }, [])
+
   function runSearch(nextQuery = query) {
     setQuery(nextQuery)
     try {
@@ -65,6 +78,12 @@ export default function App() {
     } catch (error) {
       setQueryError(error instanceof Error ? error.message : 'Invalid search query.')
     }
+  }
+
+  function clearFilters() {
+    setQuery('')
+    setQueryError(null)
+    dispatch({ type: 'filters-cleared' })
   }
 
   const timeRangeLabel = `Last ${explorer.rangeHours} ${explorer.rangeHours === 1 ? 'hour' : 'hours'}`
@@ -79,12 +98,17 @@ export default function App() {
       {mobileSidebarOpen && <button className="mobile-backdrop" type="button" aria-label="Close navigation" onClick={() => setMobileSidebarOpen(false)} />}
       <Sidebar />
       <main className="main-panel">
-        <Topbar onMenuClick={() => setMobileSidebarOpen((open) => !open)} />
+        <Topbar
+          onMenuClick={() => setMobileSidebarOpen((open) => !open)}
+          onSearchClick={() => searchInputRef.current?.focus()}
+        />
         <div className="workspace">
           <SearchPanel
+            searchInputRef={searchInputRef}
             query={query}
             onQueryChange={setQuery}
             onSearch={runSearch}
+            onClear={clearFilters}
             rangeHours={explorer.rangeHours}
             onRangeChange={(rangeHours) => dispatch({ type: 'range-changed', rangeHours })}
             validationError={queryError}

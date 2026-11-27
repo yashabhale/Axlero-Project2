@@ -41,6 +41,10 @@ test('parses supported level and quoted service filters', () => {
     parseLogSearch('level:error AND service:"billing api"'),
     { level: 'ERROR', service: 'billing api' },
   )
+  assert.deepEqual(
+    parseLogSearch('service:"billing + platform & api" AND level:warn'),
+    { service: 'billing + platform & api', level: 'WARN' },
+  )
   assert.deepEqual(parseLogSearch(''), {})
 })
 
@@ -144,6 +148,18 @@ test('reports HTTP, invalid JSON, malformed response, and network failures', asy
     globalThis.fetch = async () => { throw new TypeError('connection refused') }
     await assert.rejects(fetchLogs({}), /Unable to reach the log API/)
   })
+})
+
+test('preserves abort errors while reading the response body', async () => {
+  const abortError = new Error('request aborted')
+  abortError.name = 'AbortError'
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => { throw abortError },
+  })
+
+  await assert.rejects(fetchLogs({}), (error) => error === abortError)
 })
 
 function jsonResponse(body, status = 200) {

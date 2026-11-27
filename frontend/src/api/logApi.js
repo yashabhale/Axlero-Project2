@@ -126,7 +126,10 @@ export async function fetchLogs(filters, { signal } = {}) {
   let payload
   try {
     payload = await response.json()
-  } catch {
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw error
+    }
     const message = response.ok
       ? 'The log API returned invalid JSON.'
       : `The log API returned HTTP ${response.status} with an invalid JSON response.`

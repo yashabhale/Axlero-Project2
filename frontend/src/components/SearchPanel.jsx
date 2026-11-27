@@ -8,8 +8,10 @@ const suggestions = [
 
 export default function SearchPanel({
   query,
+  searchInputRef,
   onQueryChange,
   onSearch,
+  onClear,
   rangeHours,
   onRangeChange,
   validationError,
@@ -51,10 +53,19 @@ export default function SearchPanel({
           <label className="sr-only" htmlFor="log-query">Search log query</label>
           <input
             id="log-query"
+            ref={searchInputRef}
             autoComplete="off"
             spellCheck="false"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
+            aria-invalid={Boolean(validationError)}
+            aria-describedby={validationError ? 'log-query-error' : undefined}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault()
+                onSearch(query)
+              }
+            }}
             placeholder="Try  level:ERROR AND service:billing-api"
           />
           <kbd className="query-shortcut">⌘ ↵</kbd>
@@ -78,12 +89,12 @@ export default function SearchPanel({
               </button>
             ))}
           </div>
-          <button className="clear-query" type="button" onClick={() => { onQueryChange(''); onSearch('') }}>
-            <RotateCcw size={12} /> Clear
+          <button className="clear-query" type="button" aria-label="Clear all filters" onClick={onClear}>
+            <RotateCcw size={12} /> Clear filters
           </button>
         </div>
       </form>
-      {validationError && <p className="query-validation-error" role="alert">{validationError}</p>}
+      {validationError && <p id="log-query-error" className="query-validation-error" role="alert">{validationError}</p>}
 
       <div className="query-hint">
         <span className="hint-indicator" />

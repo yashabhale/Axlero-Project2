@@ -19,7 +19,7 @@ export function logExplorerReducer(state, action) {
     case 'filters-changed': {
       const unchanged = state.filters.level === action.filters.level
         && state.filters.service === action.filters.service
-      if (unchanged && state.page === 0) return state
+      if (unchanged) return state
       return {
         ...state,
         filters: action.filters,
@@ -30,6 +30,20 @@ export function logExplorerReducer(state, action) {
         error: null,
       }
     }
+    case 'filters-cleared':
+      if (Object.keys(state.filters).length === 0 && state.rangeHours === 1 && state.page === 0) {
+        return state
+      }
+      return {
+        ...state,
+        filters: {},
+        rangeHours: 1,
+        page: 0,
+        logs: [],
+        totalCount: 0,
+        loading: true,
+        error: null,
+      }
     case 'range-changed':
       if (state.rangeHours === action.rangeHours) return state
       return {
@@ -64,8 +78,21 @@ export function logExplorerReducer(state, action) {
     case 'request-started':
       if (action.requestId < state.requestId) return state
       return { ...state, requestId: action.requestId, loading: true, error: null }
-    case 'request-succeeded':
+    case 'request-succeeded': {
       if (action.requestId !== state.requestId) return state
+
+      const lastPage = Math.max(0, Math.ceil(action.result.totalCount / LOG_PAGE_SIZE) - 1)
+      if (state.page > lastPage) {
+        return {
+          ...state,
+          page: lastPage,
+          logs: [],
+          totalCount: action.result.totalCount,
+          loading: true,
+          error: null,
+        }
+      }
+
       return {
         ...state,
         logs: action.result.logs,
@@ -73,6 +100,7 @@ export function logExplorerReducer(state, action) {
         loading: false,
         error: null,
       }
+    }
     case 'request-failed':
       if (action.requestId !== state.requestId) return state
       return {

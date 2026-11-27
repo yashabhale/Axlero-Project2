@@ -273,7 +273,15 @@ export default function ResultsTable({
       {!loading && !error && totalLogs > 0 && (
         <div className="table-footer">
           <span>Showing <strong>{logs.length}</strong> on this page of <strong>{totalLogs.toLocaleString()}</strong> matches</span>
-          <div className="pagination">
+          <div className="pagination" role="group" aria-label="Log result pages">
+            <button
+              type="button"
+              aria-label="First page"
+              disabled={page === 0}
+              onClick={() => onPageChange(0)}
+            >
+              «
+            </button>
             <button
               type="button"
               disabled={page === 0}
@@ -282,7 +290,7 @@ export default function ResultsTable({
             >
               ‹
             </button>
-            <span className="page-current">{page + 1}</span>
+            <span className="page-current" aria-current="page">{page + 1}</span>
             <span>of {pageCount}</span>
             <button
               type="button"
@@ -291,6 +299,14 @@ export default function ResultsTable({
               onClick={() => onPageChange(page + 1)}
             >
               ›
+            </button>
+            <button
+              type="button"
+              disabled={page + 1 >= pageCount}
+              aria-label="Last page"
+              onClick={() => onPageChange(pageCount - 1)}
+            >
+              »
             </button>
             <span className="page-size">Rows per page: <strong>{pageSize}</strong></span>
           </div>

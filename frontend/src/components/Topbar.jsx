@@ -1,6 +1,6 @@
 import { Bell, ChevronDown, Command, Menu, Plus, Search, Sparkles } from 'lucide-react'
 
-export default function Topbar({ onMenuClick }) {
+export default function Topbar({ onMenuClick, onSearchClick }) {
   return (
     <header className="topbar">
       <button className="mobile-menu icon-button" type="button" onClick={onMenuClick} aria-label="Open navigation">
@@ -12,7 +12,7 @@ export default function Topbar({ onMenuClick }) {
         <strong>Log explorer</strong>
       </div>
       <div className="topbar-actions">
-        <button className="global-search" type="button">
+        <button className="global-search" type="button" onClick={onSearchClick} aria-label="Focus log search">
           <Search size={15} />
           <span>Search anything...</span>
           <kbd><Command size={11} /> K</kbd>
