@@ -1,4 +1,6 @@
 const LOG_LEVELS = new Set(['INFO', 'WARN', 'ERROR', 'DEBUG'])
+const MAX_LOG_LIMIT = 1_000
+const MAX_LOG_OFFSET = 2_147_483_647
 
 const configuredBaseUrl =
   typeof import.meta.env?.VITE_API_BASE_URL === 'string'
@@ -61,9 +63,15 @@ export function mapLogApiResponse(payload) {
     !payload
     || !Array.isArray(payload.logs)
     || !Number.isInteger(payload.limit)
+    || payload.limit <= 0
+    || payload.limit > MAX_LOG_LIMIT
     || !Number.isInteger(payload.offset)
-    || !Number.isFinite(payload.totalCount)
+    || payload.offset < 0
+    || payload.offset > MAX_LOG_OFFSET
+    || !Number.isSafeInteger(payload.totalCount)
     || payload.totalCount < 0
+    || payload.logs.length > payload.limit
+    || (payload.logs.length > 0 && payload.offset + payload.logs.length > payload.totalCount)
   ) {
     throw new Error('The log API returned an invalid response.')
   }
@@ -74,10 +82,13 @@ export function mapLogApiResponse(payload) {
     const date = new Date(timestamp)
     if (
       !Number.isFinite(timestamp)
+      || timestamp <= 0
       || !Number.isFinite(date.getTime())
       || !LOG_LEVELS.has(entry.level)
       || typeof entry.service !== 'string'
+      || !entry.service.trim()
       || typeof entry.message !== 'string'
+      || !entry.message.trim()
       || !Number.isFinite(entry.responseTimeMs)
       || entry.responseTimeMs < 0
       || !tags
@@ -137,7 +148,12 @@ export async function fetchLogs(filters, { signal } = {}) {
   }
 
   if (!response.ok) {
+    if (response.status >= 500) {
+      throw new Error('The log API encountered an internal error. Please try again.')
+    }
+
     const message = typeof payload?.error === 'string'
+      && payload.error.trim()
       ? payload.error
       : `The log API request failed with HTTP ${response.status}.`
     throw new Error(message)

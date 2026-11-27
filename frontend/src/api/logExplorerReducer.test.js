@@ -105,8 +105,14 @@ test('ignores stale requests after a newer request starts', () => {
     requestId: 1,
     result: { logs: [{ id: 'stale' }], totalCount: 1 },
   })
+  const staleFailureState = logExplorerReducer(currentState, {
+    type: 'request-failed',
+    requestId: 1,
+    error: 'stale error',
+  })
 
   assert.strictEqual(staleState, currentState)
+  assert.strictEqual(staleFailureState, currentState)
   assert.equal(staleState.logs[0].id, 'new')
 })
 
