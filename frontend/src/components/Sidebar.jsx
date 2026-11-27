@@ -70,10 +70,8 @@ export default function Sidebar() {
 
       <div className="sidebar-bottom">
         <div className="usage-card">
-          <div className="usage-heading"><span>Monthly ingestion (demo)</span><span>68%</span></div>
-          <div className="usage-track"><span /></div>
-          <div className="usage-caption">2.04 TB <span>of 3 TB</span></div>
-          <button type="button">View usage <span aria-hidden="true">→</span></button>
+          <div className="usage-heading"><span>Monthly ingestion</span><span>Unavailable</span></div>
+          <div className="usage-caption">Not provided by backend API</div>
         </div>
         <button className="nav-link sidebar-help" type="button">
           <CircleHelp aria-hidden="true" size={17} strokeWidth={1.8} />
@@ -89,7 +87,7 @@ export default function Sidebar() {
         </button>
       </div>
       <span className="sidebar-version"><ShieldCheck size={12} /> Demo status — not monitored</span>
-      <span className="sidebar-clock"><Clock3 size={12} /> Demo retention: 30 days</span>
+      <span className="sidebar-clock"><Clock3 size={12} /> Retention unavailable</span>
     </aside>
   )
 }

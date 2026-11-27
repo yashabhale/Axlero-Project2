@@ -222,7 +222,7 @@ a { color: inherit; text-decoration: none; }
 .log-volume-range:hover { color: #c9c0ff; }
 .log-volume-range.active { color: #c7b9ff; background: #29243b; }
 .log-volume-range:focus-visible { outline: 1px solid #a58af8; outline-offset: 1px; }
-.log-volume-chart-loading { height: 190px; }
+.log-volume-chart-loading { height: 190px; display: grid; place-items: center; color: #788291; font-size: 10px; }
 .logs-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .logs-table thead { height: 33px; background: #12161d; }
 .logs-table th { padding: 0 10px; color: #626c79; font: 9px var(--mono); letter-spacing: .6px; text-align: left; white-space: nowrap; }

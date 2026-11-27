@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { Activity, AlertTriangle, ArrowDownToLine, ChevronDown, Clock3, Database, Radio, Server, Zap } from 'lucide-react'
+import { Activity, AlertTriangle, ChevronDown, Clock3, Database, Radio, Server, Zap } from 'lucide-react'
 import { fetchLogs, parseLogSearch } from './api/logApi.js'
+import { calculateLogAnalytics, getLogAnalyticsDisplay } from './api/logAnalytics.js'
 import {
   createInitialLogExplorerState,
   logExplorerReducer,
@@ -11,13 +12,6 @@ import SearchPanel from './components/SearchPanel.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import StatCard from './components/StatCard.jsx'
 import Topbar from './components/Topbar.jsx'
-
-const unavailableStats = [
-  { label: 'Events ingested', value: 'N/A', detail: 'Not provided by log API', tone: 'violet', icon: ArrowDownToLine },
-  { label: 'Error rate', value: 'N/A', detail: 'Not provided by log API', tone: 'red', icon: AlertTriangle },
-  { label: 'Active services', value: 'N/A', detail: 'Not provided by log API', tone: 'blue', icon: Server },
-  { label: 'Avg. response time', value: 'N/A', detail: 'Not provided by log API', tone: 'green', icon: Zap },
-]
 
 export default function App() {
   const [explorer, dispatch] = useReducer(
@@ -92,6 +86,38 @@ export default function App() {
     : explorer.loading
       ? 'Loading logs'
       : 'Backend connected'
+  const analytics = calculateLogAnalytics(explorer.logs, explorer.totalCount)
+  const analyticsDisplay = getLogAnalyticsDisplay(analytics, explorer)
+  const stats = [
+    {
+      label: 'Matching logs',
+      value: analyticsDisplay.matchingLogCount,
+      detail: analyticsDisplay.matchingLogDetail,
+      tone: 'blue',
+      icon: Database,
+    },
+    {
+      label: 'Visible logs',
+      value: analyticsDisplay.pageLogCount,
+      detail: analyticsDisplay.pageDetail,
+      tone: 'violet',
+      icon: Server,
+    },
+    {
+      label: 'Error rate (page)',
+      value: analyticsDisplay.pageErrorRate,
+      detail: analyticsDisplay.pageDetail,
+      tone: 'red',
+      icon: AlertTriangle,
+    },
+    {
+      label: 'Avg. response (page)',
+      value: analyticsDisplay.pageAverageResponseTime,
+      detail: analyticsDisplay.pageDetail,
+      tone: 'green',
+      icon: Zap,
+    },
+  ]
 
   return (
     <div className={`app-shell${mobileSidebarOpen ? ' sidebar-open' : ''}`}>
@@ -114,8 +140,8 @@ export default function App() {
             validationError={queryError}
           />
 
-          <section className="stats-grid" aria-label="Backend metrics unavailable">
-            {unavailableStats.map((stat) => <StatCard key={stat.label} {...stat} />)}
+          <section className="stats-grid" aria-label="Log analytics">
+            {stats.map((stat) => <StatCard key={stat.label} {...stat} />)}
           </section>
 
           <div className="results-toolbar">

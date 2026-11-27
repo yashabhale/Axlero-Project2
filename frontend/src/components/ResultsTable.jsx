@@ -85,15 +85,18 @@ function LogRow({ log, expanded, onToggle }) {
   )
 }
 
-function LogVolumeChart({ logs }) {
+function LogVolumeChart({ logs, loading, error }) {
   const [rangeMinutes, setRangeMinutes] = useState(60)
   const now = Date.now()
   const bucketMinutes = rangeMinutes === 15 ? 1 : rangeMinutes === 60 ? 5 : 30
   const bucketCount = rangeMinutes / bucketMinutes
   const rangeStart = now - rangeMinutes * 60_000
   const counts = Array(bucketCount).fill(0)
+  const pageLogs = Array.isArray(logs) ? logs : []
 
-  logs.forEach((log) => {
+  pageLogs.forEach((log) => {
+    if (!log || typeof log !== 'object') return
+    if (typeof log.timestamp !== 'number' || !Number.isFinite(log.timestamp)) return
     const timestamp = new Date(log.timestamp).getTime()
     if (!Number.isFinite(timestamp) || timestamp < rangeStart || timestamp > now) return
     const bucketIndex = Math.min(bucketCount - 1, Math.floor((timestamp - rangeStart) / (bucketMinutes * 60_000)))
@@ -154,7 +157,13 @@ function LogVolumeChart({ logs }) {
       <div className="log-volume-heading">
         <div>
           <h2>Visible page volume</h2>
-          <span>{totalInRange.toLocaleString()} records on this page in the last {rangeMinutes} minutes</span>
+          <span>
+            {loading
+              ? 'Loading backend data'
+              : error
+                ? 'Unavailable · API error'
+                : `${totalInRange.toLocaleString()} records on this page in the last ${rangeMinutes} minutes`}
+          </span>
         </div>
         <div className="log-volume-ranges" role="group" aria-label="Histogram time range">
           {[15, 60, 360].map((minutes) => (
@@ -170,10 +179,16 @@ function LogVolumeChart({ logs }) {
           ))}
         </div>
       </div>
-      <Suspense fallback={<div className="log-volume-chart-loading" aria-label="Loading histogram" />}>
-        <div role="img" aria-label={`Histogram of ${totalInRange} visible page records over the last ${rangeMinutes} minutes`}>
-          <ReactECharts option={option} notMerge lazyUpdate style={{ height: 190, width: '100%' }} />
-        </div>
+      <Suspense fallback={<div className="log-volume-chart-loading" role="status">Loading histogram…</div>}>
+        {loading || error ? (
+          <div className="log-volume-chart-loading" role={error ? 'alert' : 'status'}>
+            {error ? 'Page volume unavailable.' : 'Loading current page volume…'}
+          </div>
+        ) : (
+          <div role="img" aria-label={`Histogram of ${totalInRange} visible page records over the last ${rangeMinutes} minutes`}>
+            <ReactECharts option={option} notMerge lazyUpdate style={{ height: 190, width: '100%' }} />
+          </div>
+        )}
       </Suspense>
     </section>
   )
@@ -204,12 +219,16 @@ export default function ResultsTable({
 
   return (
     <section className="results-section">
-      <LogVolumeChart logs={logs} />
+      <LogVolumeChart logs={logs} loading={loading} error={error} />
       <div className="results-heading">
         <div className="results-title-group">
           <h2>Log events</h2>
           <span className="results-count">
-            {loading ? 'Loading' : `${logs.length.toLocaleString()} of ${totalLogs.toLocaleString()}`}
+            {loading
+              ? 'Loading'
+              : error
+                ? 'Unavailable'
+                : `${logs.length.toLocaleString()} of ${totalLogs.toLocaleString()}`}
           </span>
           <span className="results-source">BACKEND</span>
         </div>
