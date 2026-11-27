@@ -9,9 +9,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Set;
 
@@ -55,7 +57,12 @@ class LogQueryHttpServerTest {
         assertEquals(0, body.get("offset").asInt());
         assertEquals(4, body.get("totalCount").asLong());
         assertEquals(4, body.get("logs").size());
+        assertTrue(body.get("logs").isArray());
         assertEquals("first", body.get("logs").get(0).get("message").asText());
+        assertEquals(BASE_TIMESTAMP, body.get("logs").get(0).get("timestamp").asLong());
+        assertEquals("ERROR", body.get("logs").get(0).get("level").asText());
+        assertEquals("api", body.get("logs").get(0).get("service").asText());
+        assertEquals(42, body.get("logs").get(0).get("responseTimeMs").asInt());
         assertEquals("test", body.get("logs").get(0).get("tags").get("environment").asText());
     }
 
@@ -87,14 +94,65 @@ class LogQueryHttpServerTest {
     }
 
     @Test
+    void acceptsMaximumLimitAndReturnsEmptyPagesBeyondAvailableResults() throws Exception {
+        JsonNode maximumLimit = json(get("?limit=1000"));
+        assertEquals(1000, maximumLimit.get("limit").asInt());
+        assertEquals(4, maximumLimit.get("logs").size());
+        assertEquals(4, maximumLimit.get("totalCount").asLong());
+
+        JsonNode atEnd = json(get("?offset=4"));
+        assertTrue(atEnd.get("logs").isEmpty());
+        assertEquals(4, atEnd.get("totalCount").asLong());
+
+        JsonNode beyondEnd = json(get("?offset=100"));
+        assertTrue(beyondEnd.get("logs").isEmpty());
+        assertEquals(4, beyondEnd.get("totalCount").asLong());
+    }
+
+    @Test
+    void decodesUrlEncodedServiceNamesAndSpecialCharacters() throws Exception {
+        String service = "checkout + billing &%東京";
+        InMemoryLogSink sink = new InMemoryLogSink();
+        sink.accept(log(service, "encoded service", LogLevel.INFO, BASE_TIMESTAMP));
+
+        try (LogQueryHttpServer specialServiceServer =
+                     new LogQueryHttpServer(0, sink, Set.of())) {
+            String encodedService = URLEncoder.encode(service, StandardCharsets.UTF_8);
+            JsonNode response = json(get(specialServiceServer, "?service=" + encodedService));
+
+            assertEquals(1, response.get("totalCount").asLong());
+            assertEquals(service, response.get("logs").get(0).get("service").asText());
+        }
+    }
+
+    @Test
+    void returnsStructuredEmptyResponseForEmptyDatabase() throws Exception {
+        try (LogQueryHttpServer emptyServer =
+                     new LogQueryHttpServer(0, new InMemoryLogSink(), Set.of())) {
+            HttpResponse<String> httpResponse = get(emptyServer, "");
+            JsonNode response = json(httpResponse);
+
+            assertEquals(100, response.get("limit").asInt());
+            assertEquals(0, response.get("offset").asInt());
+            assertEquals(0, response.get("totalCount").asLong());
+            assertTrue(response.get("logs").isArray());
+            assertTrue(response.get("logs").isEmpty());
+        }
+    }
+
+    @Test
     void returnsBadRequestForInvalidParameters() throws Exception {
         List<String> invalidQueries = List.of(
                 "?level=NOT_A_LEVEL",
                 "?limit=1001",
+                "?limit=-1",
                 "?limit=abc",
                 "?offset=-1",
                 "?service=%20",
                 "?startTime=not-a-timestamp",
+                "?startTime=9223372036854775808",
+                "?startTime=-1",
+                "?endTime=-1",
                 "?startTime=200&endTime=200",
                 "?unknown=value",
                 "?limit=1&limit=2");
@@ -136,6 +194,45 @@ class LogQueryHttpServerTest {
             assertEquals(500, response.statusCode());
             assertEquals("Internal server error", objectMapper.readTree(response.body()).get("error").asText());
             assertFalse(response.body().contains("database credentials"));
+            assertFalse(response.body().contains("IllegalStateException"));
+            assertFalse(response.body().contains("at com.logstream"));
+            assertTrue(response.headers().firstValue("Content-Type").orElse("")
+                    .startsWith("application/json"));
+        }
+    }
+
+    @Test
+    void returnsGenericInternalErrorWhenCountingFails() throws Exception {
+        LogSink failingSink = new LogSink() {
+            @Override
+            public void accept(LogMessage logMessage) {
+            }
+
+            @Override
+            public List<LogMessage> queryLogs(LogQuery query) {
+                return List.of();
+            }
+
+            @Override
+            public long countLogs(LogQuery query) {
+                throw new IllegalStateException("private database failure details");
+            }
+
+            @Override
+            public List<TimeSeriesBucket> countLogsByMinute(long startTimestampMs, long endTimestampMs) {
+                return List.of();
+            }
+        };
+
+        try (LogQueryHttpServer failingServer =
+                     new LogQueryHttpServer(0, failingSink, Set.of())) {
+            HttpResponse<String> response = get(failingServer, "");
+
+            assertEquals(500, response.statusCode());
+            assertEquals("Internal server error", objectMapper.readTree(response.body()).get("error").asText());
+            assertFalse(response.body().contains("private database failure details"));
+            assertFalse(response.body().contains("IllegalStateException"));
+            assertFalse(response.body().contains("at com.logstream"));
         }
     }
 
@@ -154,6 +251,32 @@ class LogQueryHttpServerTest {
         assertEquals(204, preflightResponse.statusCode());
         assertEquals("GET, OPTIONS",
                 preflightResponse.headers().firstValue("Access-Control-Allow-Methods").orElseThrow());
+    }
+
+    @Test
+    void rejectsDisallowedOriginsAndUnsupportedMethods() throws Exception {
+        HttpResponse<String> disallowedGet = get("", "http://untrusted.example");
+        assertEquals(200, disallowedGet.statusCode());
+        assertFalse(disallowedGet.headers().firstValue("Access-Control-Allow-Origin").isPresent());
+
+        HttpRequest preflight = HttpRequest.newBuilder(uri(server, ""))
+                .header("Origin", "http://untrusted.example")
+                .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> preflightResponse =
+                httpClient.send(preflight, HttpResponse.BodyHandlers.ofString());
+        assertEquals(403, preflightResponse.statusCode());
+        assertEquals("Origin not allowed", objectMapper.readTree(preflightResponse.body()).get("error").asText());
+        assertFalse(preflightResponse.headers().firstValue("Access-Control-Allow-Origin").isPresent());
+
+        HttpRequest post = HttpRequest.newBuilder(uri(server, ""))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> postResponse =
+                httpClient.send(post, HttpResponse.BodyHandlers.ofString());
+        assertEquals(405, postResponse.statusCode());
+        assertEquals("GET, OPTIONS", postResponse.headers().firstValue("Allow").orElseThrow());
+        assertEquals("Method not allowed", objectMapper.readTree(postResponse.body()).get("error").asText());
     }
 
     private HttpResponse<String> get(String query) throws Exception {
