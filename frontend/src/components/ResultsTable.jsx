@@ -1,7 +1,5 @@
-import { ChevronDown, ChevronRight, Copy, Download, Ellipsis, ExternalLink, ListFilter } from 'lucide-react'
-import { lazy, Suspense, useState } from 'react'
-
-const ReactECharts = lazy(() => import('./EChartsView.jsx'))
+import { ChevronDown, ChevronRight, Copy, Download, Ellipsis, ExternalLink, ListFilter, Loader2 } from 'lucide-react'
+import { useState } from 'react'
 
 function formatTimestamp(timestamp) {
   const date = new Date(timestamp)
@@ -32,6 +30,13 @@ function LogRow({ log, expanded, onToggle }) {
     }
   }
 
+  const levelColors = {
+    ERROR: 'level-error',
+    WARN: 'level-warn',
+    INFO: 'level-info',
+    DEBUG: 'level-debug',
+  }
+
   return (
     <>
       <tr className={`log-row${expanded ? ' log-row-expanded' : ''}`} onClick={onToggle}>
@@ -44,7 +49,7 @@ function LogRow({ log, expanded, onToggle }) {
           <span>{formatTimestamp(log.timestamp)}</span>
           <span className="timestamp-relative">{formatRelativeTime(log.timestamp)}</span>
         </td>
-        <td><span className={`level-pill level-${log.level.toLowerCase()}`}><span />{log.level}</span></td>
+        <td><span className={`level-pill ${levelColors[log.level] || 'level-info'}`}><span />{log.level}</span></td>
         <td><span className="service-name">{log.service}</span></td>
         <td className="message-cell"><span>{log.message}</span></td>
         <td className="row-actions-cell">
@@ -72,10 +77,10 @@ function LogRow({ log, expanded, onToggle }) {
                 <span>{log.message}</span>
               </div>
               <div className="detail-meta">
-                <div><span className="detail-label">TRACE ID</span><code>{log.traceId}</code></div>
-                <div><span className="detail-label">HOST</span><code>{log.host}</code></div>
                 <div><span className="detail-label">RESPONSE TIME</span><code>{log.duration} ms</code></div>
-                <button type="button" className="trace-link">View trace <ExternalLink size={12} /></button>
+                {log.tags && Object.entries(log.tags).map(([key, value]) => (
+                  <div key={key}><span className="detail-label">{key.toUpperCase()}</span><code>{value}</code></div>
+                ))}
               </div>
             </div>
           </td>
@@ -85,101 +90,7 @@ function LogRow({ log, expanded, onToggle }) {
   )
 }
 
-function LogVolumeChart({ logs }) {
-  const [rangeMinutes, setRangeMinutes] = useState(60)
-  const now = Date.now()
-  const bucketMinutes = rangeMinutes === 15 ? 1 : rangeMinutes === 60 ? 5 : 30
-  const bucketCount = rangeMinutes / bucketMinutes
-  const rangeStart = now - rangeMinutes * 60_000
-  const counts = Array(bucketCount).fill(0)
-
-  logs.forEach((log) => {
-    const timestamp = new Date(log.timestamp).getTime()
-    if (!Number.isFinite(timestamp) || timestamp < rangeStart || timestamp > now) return
-    const bucketIndex = Math.min(bucketCount - 1, Math.floor((timestamp - rangeStart) / (bucketMinutes * 60_000)))
-    counts[bucketIndex] += 1
-  })
-
-  const categories = counts.map((_, index) => {
-    const date = new Date(rangeStart + index * bucketMinutes * 60_000)
-    return new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
-  })
-  const totalInRange = counts.reduce((total, count) => total + count, 0)
-  const option = {
-    animationDuration: 250,
-    grid: { left: 42, right: 12, top: 16, bottom: 28 },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      backgroundColor: '#1b2029',
-      borderColor: '#343b47',
-      textStyle: { color: '#e1e5ed', fontSize: 11 },
-      formatter: (items) => `${items[0].axisValue}<br/><strong>${items[0].value}</strong> logs`,
-    },
-    xAxis: {
-      type: 'category',
-      data: categories,
-      axisTick: { show: false },
-      axisLine: { lineStyle: { color: '#303743' } },
-      axisLabel: {
-        color: '#778190',
-        fontSize: 9,
-        interval: Math.max(0, Math.ceil(bucketCount / 6) - 1),
-      },
-    },
-    yAxis: {
-      type: 'value',
-      min: 0,
-      minInterval: 1,
-      splitNumber: 3,
-      axisTick: { show: false },
-      axisLine: { show: false },
-      axisLabel: { color: '#778190', fontSize: 9 },
-      splitLine: { lineStyle: { color: '#242a34', type: 'dashed' } },
-    },
-    series: [{
-      name: 'Logs',
-      type: 'bar',
-      data: counts,
-      barMaxWidth: 24,
-      showBackground: true,
-      backgroundStyle: { color: '#1a2029', borderRadius: [3, 3, 0, 0] },
-      itemStyle: { color: '#9b82f3', borderRadius: [3, 3, 0, 0] },
-      emphasis: { itemStyle: { color: '#b5a3ff' } },
-    }],
-  }
-
-  return (
-    <section className="log-volume-card" aria-label="Log volume histogram">
-      <div className="log-volume-heading">
-        <div>
-          <h2>Log volume over time</h2>
-          <span>{totalInRange.toLocaleString()} loaded events in the last {rangeMinutes} minutes</span>
-        </div>
-        <div className="log-volume-ranges" role="group" aria-label="Histogram time range">
-          {[15, 60, 360].map((minutes) => (
-            <button
-              key={minutes}
-              type="button"
-              className={rangeMinutes === minutes ? 'log-volume-range active' : 'log-volume-range'}
-              aria-pressed={rangeMinutes === minutes}
-              onClick={() => setRangeMinutes(minutes)}
-            >
-              {minutes === 15 ? '15m' : minutes === 60 ? '1h' : '6h'}
-            </button>
-          ))}
-        </div>
-      </div>
-      <Suspense fallback={<div className="log-volume-chart-loading" aria-label="Loading histogram" />}>
-        <div role="img" aria-label={`Histogram of ${totalInRange} loaded log events over the last ${rangeMinutes} minutes`}>
-          <ReactECharts option={option} notMerge lazyUpdate style={{ height: 190, width: '100%' }} />
-        </div>
-      </Suspense>
-    </section>
-  )
-}
-
-export default function ResultsTable({ logs, totalLogs, onLoadMore }) {
+export default function ResultsTable({ logs, totalLogs, onLoadMore, loading }) {
   const [expandedId, setExpandedId] = useState(null)
 
   function exportLogs() {
@@ -194,12 +105,11 @@ export default function ResultsTable({ logs, totalLogs, onLoadMore }) {
 
   return (
     <section className="results-section">
-      <LogVolumeChart logs={logs} />
       <div className="results-heading">
         <div className="results-title-group">
           <h2>Log events</h2>
           <span className="results-count">{logs.length.toLocaleString()} <span>of</span> {totalLogs.toLocaleString()}</span>
-          <span className="results-live"><span /> LIVE</span>
+          <span className="results-live"><span /> {loading ? 'LOADING...' : 'LIVE'}</span>
         </div>
         <div className="results-actions">
           <span className="results-refresh">Updated just now</span>
@@ -251,7 +161,9 @@ export default function ResultsTable({ logs, totalLogs, onLoadMore }) {
             <button type="button" disabled aria-label="Next page">›</button>
             <span className="page-size">Rows per page: <strong>50</strong><ChevronDown size={12} /></span>
           </div>
-          <button className="load-more-button" type="button" onClick={onLoadMore}>Load more events <span>↓</span></button>
+          <button className="load-more-button" type="button" onClick={onLoadMore} disabled={loading}>
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Load more events <span>↓</span>'}
+          </button>
         </div>
       )}
     </section>

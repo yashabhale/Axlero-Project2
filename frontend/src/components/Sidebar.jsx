@@ -9,26 +9,18 @@ import {
   Search,
   Settings2,
   ShieldCheck,
+  BarChart2,
 } from 'lucide-react'
 
-const primaryNavigation = [
-  { label: 'Overview', icon: Layers3 },
-  { label: 'Log explorer', icon: Search, active: true },
-  { label: 'Live tail', icon: Activity, badge: 'LIVE' },
-  { label: 'Alerts', icon: Bell, count: '3' },
-]
-
-const workspaceNavigation = [
-  { label: 'Saved searches', icon: FileText },
-  { label: 'Dashboards', icon: Layers3 },
-  { label: 'Manage sources', icon: Settings2 },
-]
-
-function NavigationLink({ item }) {
+function NavigationLink({ item, onClick }) {
   const Icon = item.icon
 
   return (
-    <button className={`nav-link${item.active ? ' nav-link-active' : ''}`} type="button">
+    <button
+      className={`nav-link${item.active ? ' nav-link-active' : ''}`}
+      type="button"
+      onClick={() => onClick(item.id)}
+    >
       <Icon aria-hidden="true" size={17} strokeWidth={1.8} />
       <span>{item.label}</span>
       {item.badge && <span className="nav-live">{item.badge}</span>}
@@ -37,7 +29,19 @@ function NavigationLink({ item }) {
   )
 }
 
-export default function Sidebar() {
+export default function Sidebar({ navigation, activePage, onNavigate }) {
+  const primaryNavigation = navigation || [
+    { id: 'search', label: 'Log Search', icon: Search },
+    { id: 'alerts', label: 'Alerts', icon: Bell },
+    { id: 'analytics', label: 'Analytics', icon: BarChart2 },
+  ]
+
+  const workspaceNavigation = [
+    { id: 'saved-searches', label: 'Saved searches', icon: FileText },
+    { id: 'dashboards', label: 'Dashboards', icon: Layers3 },
+    { id: 'sources', label: 'Manage sources', icon: Settings2 },
+  ]
+
   return (
     <aside className="sidebar">
       <a className="brand" href="#" aria-label="LogStream home">
@@ -57,14 +61,26 @@ export default function Sidebar() {
       <div className="sidebar-section">
         <div className="sidebar-section-label">OBSERVABILITY</div>
         <nav aria-label="Observability">
-          {primaryNavigation.map((item) => <NavigationLink key={item.label} item={item} />)}
+          {primaryNavigation.map((item) => (
+            <NavigationLink
+              key={item.id}
+              item={{ ...item, active: item.id === activePage }}
+              onClick={onNavigate}
+            />
+          ))}
         </nav>
       </div>
 
       <div className="sidebar-section workspace-section">
         <div className="sidebar-section-label">WORKSPACE</div>
         <nav aria-label="Workspace">
-          {workspaceNavigation.map((item) => <NavigationLink key={item.label} item={item} />)}
+          {workspaceNavigation.map((item) => (
+            <NavigationLink
+              key={item.id}
+              item={item}
+              onClick={onNavigate}
+            />
+          ))}
         </nav>
       </div>
 
@@ -77,7 +93,7 @@ export default function Sidebar() {
         </div>
         <button className="nav-link sidebar-help" type="button">
           <CircleHelp aria-hidden="true" size={17} strokeWidth={1.8} />
-          <span>Help &amp; support</span>
+          <span>Help & support</span>
         </button>
         <button className="profile-button" type="button">
           <span className="profile-avatar">YA</span>
