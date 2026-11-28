@@ -82,6 +82,20 @@ class LogQueryHttpServerTest {
     }
 
     @Test
+    void combinesFiltersWithPaginationAndHalfOpenTimestamps() throws Exception {
+        JsonNode response = json(get(
+                "?level=ERROR&service=api&startTime=" + BASE_TIMESTAMP
+                        + "&endTime=" + (BASE_TIMESTAMP + 301)
+                        + "&limit=1&offset=1"));
+
+        assertEquals(2, response.get("totalCount").asLong());
+        assertEquals(1, response.get("limit").asInt());
+        assertEquals(1, response.get("offset").asInt());
+        assertEquals(1, response.get("logs").size());
+        assertEquals("fourth", response.get("logs").get(0).get("message").asText());
+    }
+
+    @Test
     void paginatesAndReturnsEmptyResults() throws Exception {
         JsonNode page = json(get("?limit=1&offset=1"));
         assertEquals(1, page.get("logs").size());
@@ -144,16 +158,30 @@ class LogQueryHttpServerTest {
     void returnsBadRequestForInvalidParameters() throws Exception {
         List<String> invalidQueries = List.of(
                 "?level=NOT_A_LEVEL",
+                "?level=LOG_LEVEL_UNSPECIFIED",
+                "?level=UNRECOGNIZED",
+                "?level=",
                 "?limit=1001",
                 "?limit=-1",
+                "?limit=0",
                 "?limit=abc",
+                "?limit=",
                 "?offset=-1",
+                "?offset=abc",
+                "?offset=2147483648",
+                "?offset=",
                 "?service=%20",
+                "?service=",
                 "?startTime=not-a-timestamp",
                 "?startTime=9223372036854775808",
                 "?startTime=-1",
+                "?startTime=",
                 "?endTime=-1",
+                "?endTime=not-a-timestamp",
+                "?endTime=9223372036854775808",
+                "?endTime=",
                 "?startTime=200&endTime=200",
+                "?startTime=300&endTime=200",
                 "?unknown=value",
                 "?limit=1&limit=2");
 
