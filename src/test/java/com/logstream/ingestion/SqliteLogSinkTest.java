@@ -160,6 +160,103 @@ class SqliteLogSinkTest {
     }
 
     @Test
+    void appliesLevelAndServiceFiltersIndividuallyAndInCombination() throws Exception {
+        long timestamp = 1_730_000_000_000L;
+        try (SqliteLogSink sink = new SqliteLogSink(tempDirectory.resolve("individual-filters.db"))) {
+            sink.accept(logAt("api", "api error", timestamp).toBuilder()
+                    .setLevel(LogLevel.ERROR)
+                    .build());
+            sink.accept(logAt("api", "api info", timestamp + 1));
+            sink.accept(logAt("worker", "worker error", timestamp + 2).toBuilder()
+                    .setLevel(LogLevel.ERROR)
+                    .build());
+            sink.accept(logAt("api", "api warning", timestamp + 3).toBuilder()
+                    .setLevel(LogLevel.WARN)
+                    .build());
+
+            List<LogMessage> errors = sink.queryLogs(
+                    new LogQuery(LogLevel.ERROR, null, null, null, 10, 0));
+            assertEquals(List.of("api error", "worker error"),
+                    errors.stream().map(LogMessage::getMessage).toList());
+            assertEquals(2, sink.countLogs(new LogQuery(
+                    LogLevel.ERROR, null, null, null, 10, 0)));
+
+            List<LogMessage> apiLogs = sink.queryLogs(
+                    new LogQuery(null, "api", null, null, 10, 0));
+            assertEquals(List.of("api error", "api info", "api warning"),
+                    apiLogs.stream().map(LogMessage::getMessage).toList());
+            assertEquals(3, sink.countLogs(new LogQuery(
+                    null, "api", null, null, 10, 0)));
+
+            List<LogMessage> apiErrors = sink.queryLogs(
+                    new LogQuery(LogLevel.ERROR, "api", null, null, 10, 0));
+            assertEquals(List.of("api error"),
+                    apiErrors.stream().map(LogMessage::getMessage).toList());
+            assertEquals(1, sink.countLogs(new LogQuery(
+                    LogLevel.ERROR, "api", null, null, 10, 0)));
+        }
+    }
+
+    @Test
+    void emptyDatabaseReturnsNoLogsAndZeroCount() throws Exception {
+        try (SqliteLogSink sink = new SqliteLogSink(tempDirectory.resolve("empty-query.db"))) {
+            LogQuery query = new LogQuery(null, null, null, null, 10, 0);
+
+            assertEquals(List.of(), sink.queryLogs(query));
+            assertEquals(0, sink.countLogs(query));
+        }
+    }
+
+    @Test
+    void serviceFilterTreatsSpecialCharactersAsLiteralText() throws Exception {
+        long timestamp = 1_730_000_000_000L;
+        String literalService = "api' OR 1=1 --";
+        try (SqliteLogSink sink = new SqliteLogSink(tempDirectory.resolve("literal-service.db"))) {
+            sink.accept(logAt(literalService, "literal match", timestamp));
+            sink.accept(logAt("api", "ordinary service", timestamp + 1));
+
+            List<LogMessage> literalMatches = sink.queryLogs(
+                    new LogQuery(null, literalService, null, null, 10, 0));
+            assertEquals(List.of("literal match"),
+                    literalMatches.stream().map(LogMessage::getMessage).toList());
+            assertEquals(1, sink.countLogs(
+                    new LogQuery(null, literalService, null, null, 10, 0)));
+
+            assertEquals(List.of(), sink.queryLogs(
+                    new LogQuery(null, "missing'; DROP TABLE log_events; --",
+                            null, null, 10, 0)));
+        }
+    }
+
+    @Test
+    void paginationPagesAreDisjointAndLargeOffsetsReturnNoRows() throws Exception {
+        long timestamp = 1_730_000_000_000L;
+        try (SqliteLogSink sink = new SqliteLogSink(tempDirectory.resolve("pagination.db"))) {
+            for (int index = 1; index <= 5; index++) {
+                sink.accept(logAt("api", "record " + index, timestamp + index));
+            }
+
+            List<LogMessage> firstPage = sink.queryLogs(
+                    new LogQuery(null, null, null, null, 2, 0));
+            List<LogMessage> secondPage = sink.queryLogs(
+                    new LogQuery(null, null, null, null, 2, 2));
+
+            assertEquals(List.of("record 1", "record 2"),
+                    firstPage.stream().map(LogMessage::getMessage).toList());
+            assertEquals(List.of("record 3", "record 4"),
+                    secondPage.stream().map(LogMessage::getMessage).toList());
+            assertTrue(firstPage.stream().noneMatch(secondPage::contains));
+            assertEquals(List.of("record 5"), sink.queryLogs(
+                    new LogQuery(null, null, null, null, 2, 4)).stream()
+                    .map(LogMessage::getMessage).toList());
+            assertEquals(List.of(), sink.queryLogs(
+                    new LogQuery(null, null, null, null, 10, 2_000_000_000)));
+            assertEquals(List.of(), sink.queryLogs(
+                    new LogQuery(null, null, null, null, 10, Integer.MAX_VALUE)));
+        }
+    }
+
+    @Test
     void emptyBatchDoesNotPersistRecordsOrPreventLaterWrites() throws Exception {
         Path databasePath = tempDirectory.resolve("empty-batch.db");
         try (SqliteLogSink sink = new SqliteLogSink(databasePath)) {
