@@ -58,6 +58,12 @@ class LogQueryHttpServerTest {
         assertEquals(4, body.get("totalCount").asLong());
         assertEquals(4, body.get("logs").size());
         assertTrue(body.get("logs").isArray());
+        assertEquals(4, body.size());
+        assertTrue(body.has("logs"));
+        assertTrue(body.has("limit"));
+        assertTrue(body.has("offset"));
+        assertTrue(body.has("totalCount"));
+        assertEquals(6, body.get("logs").get(0).size());
         assertEquals("first", body.get("logs").get(0).get("message").asText());
         assertEquals(BASE_TIMESTAMP, body.get("logs").get(0).get("timestamp").asLong());
         assertEquals("ERROR", body.get("logs").get(0).get("level").asText());
@@ -183,13 +189,35 @@ class LogQueryHttpServerTest {
                 "?startTime=200&endTime=200",
                 "?startTime=300&endTime=200",
                 "?unknown=value",
-                "?limit=1&limit=2");
+                "?limit=1&limit=2",
+                "?service=%");
 
         for (String query : invalidQueries) {
             HttpResponse<String> response = get(query);
             assertEquals(400, response.statusCode(), query);
-            assertTrue(objectMapper.readTree(response.body()).has("error"), query);
+            JsonNode error = objectMapper.readTree(response.body());
+            assertEquals(1, error.size(), query);
+            assertTrue(error.has("error"), query);
+            assertTrue(response.headers().firstValue("Content-Type").orElse("")
+                    .startsWith("application/json"), query);
         }
+    }
+
+    @Test
+    void returnsStructuredNotFoundResponseForUnknownApiPath() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + server.getPort() + "/api/unknown"))
+                .GET()
+                .build();
+        HttpResponse<String> response =
+                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(404, response.statusCode());
+        assertTrue(response.headers().firstValue("Content-Type").orElse("")
+                .startsWith("application/json"));
+        JsonNode body = objectMapper.readTree(response.body());
+        assertEquals(1, body.size());
+        assertEquals("Not found", body.get("error").asText());
     }
 
     @Test
